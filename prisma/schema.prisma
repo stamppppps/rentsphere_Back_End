@@ -1,0 +1,425 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  TENANT
+  OWNER
+  ADMIN
+}
+
+enum CondoType {
+  DORM
+  CONDO
+}
+
+enum RoomStatus {
+  AVAILABLE
+  OCCUPIED
+  MAINTENANCE
+}
+
+enum TenancyStatus {
+  ACTIVE
+  ENDED
+}
+
+enum RepairPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum RepairStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+  CANCELED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELED
+  COMPLETED
+}
+
+enum ParcelStatus {
+  INCOMING
+  ARRIVED
+  PICKED_UP
+  RETURNED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+  QR
+  CARD
+  OTHER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String?
+  name         String?
+  phone        String?
+  role         Role
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Tenant 
+  currentTenancyId String?  @unique
+  currentTenancy   Tenancy? @relation("CurrentTenancy", fields: [currentTenancyId], references: [id])
+
+  // relations
+  ownedCondos   OwnerCondo[] // Owner -> many condos
+  tenancies     Tenancy[] 
+  repairTickets RepairTicket[] @relation("RepairCreatedBy")
+  parcels       Parcel[]
+  payments      Payment[]
+  invoices      Invoice[]      @relation("InvoiceTenant")
+
+  announcements Announcement[] @relation("AnnouncementCreatedBy")
+
+  chatRoomsCreated ChatRoom[]        @relation("ChatRoomCreatedBy")
+  chatMemberships  ChatMember[]
+  chatMessages     ChatMessage[]
+  facilityBookings FacilityBooking[]
+}
+
+model Condo {
+  id        String    @id @default(cuid())
+  name      String
+  type      CondoType
+  address   String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  owners    OwnerCondo[]
+  buildings Building[]
+  rooms     Room[]
+  tenancies Tenancy[]
+
+  repairTickets RepairTicket[]
+  facilities    Facility[]
+  bookings      FacilityBooking[]
+  parcels       Parcel[]
+  payments      Payment[]
+  invoices      Invoice[]
+
+  chatRooms     ChatRoom[]
+  announcements Announcement[]
+}
+
+model OwnerCondo {
+  id        String   @id @default(cuid())
+  ownerId   String
+  condoId   String
+  createdAt DateTime @default(now())
+
+  owner User  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  condo Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, condoId])
+  @@index([condoId])
+}
+
+model Building {
+  id        String   @id @default(cuid())
+  condoId   String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  condo Condo  @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  rooms Room[]
+
+  @@unique([condoId, name])
+  @@index([condoId])
+}
+
+model Room {
+  id         String     @id @default(cuid())
+  condoId    String
+  buildingId String?
+  label      String // เช่น A-101
+  floor      Int?
+  status     RoomStatus @default(AVAILABLE)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  condo    Condo     @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  building Building? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
+
+  tenancies     Tenancy[]
+  repairTickets RepairTicket[]
+
+  @@unique([condoId, label])
+  @@index([condoId])
+  @@index([buildingId])
+}
+
+model Tenancy {
+  id        String        @id @default(cuid())
+  tenantId  String
+  condoId   String
+  roomId    String
+  status    TenancyStatus @default(ACTIVE)
+  startDate DateTime      @default(now())
+  endDate   DateTime?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  tenant User  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  condo  Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  room   Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  // ฝั่งตรงข้ามของ currentTenancy
+  currentFor User? @relation("CurrentTenancy")
+
+  @@index([tenantId])
+  @@index([condoId])
+  @@index([roomId])
+}
+
+model RepairTicket {
+  id          String  @id @default(cuid())
+  condoId     String
+  roomId      String?
+  createdById String
+
+  category    String
+  location    String
+  description String
+  priority    RepairPriority @default(LOW)
+  status      RepairStatus   @default(OPEN)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  condo     Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  room      Room? @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  createdBy User  @relation("RepairCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+
+  images RepairImage[]
+  notes  RepairNote[]
+
+  @@index([condoId])
+  @@index([createdById])
+  @@index([roomId])
+}
+
+model RepairImage {
+  id        String   @id @default(cuid())
+  ticketId  String
+  url       String
+  createdAt DateTime @default(now())
+
+  ticket RepairTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+}
+
+model RepairNote {
+  id        String   @id @default(cuid())
+  ticketId  String
+  message   String
+  createdAt DateTime @default(now())
+
+  ticket RepairTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+}
+
+model Facility {
+  id          String   @id @default(cuid())
+  condoId     String
+  name        String
+  description String?
+  openTime    String? // "09:00"
+  closeTime   String? // "21:00"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  condo    Condo             @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  bookings FacilityBooking[]
+
+  @@unique([condoId, name])
+  @@index([condoId])
+}
+
+model FacilityBooking {
+  id         String        @id @default(cuid())
+  condoId    String
+  facilityId String
+  userId     String
+  startAt    DateTime
+  endAt      DateTime
+  status     BookingStatus @default(PENDING)
+  note       String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  condo    Condo    @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([condoId])
+  @@index([facilityId])
+  @@index([userId])
+}
+
+model Parcel {
+  id         String       @id @default(cuid())
+  condoId    String
+  userId     String?
+  tracking   String?
+  carrier    String?
+  status     ParcelStatus @default(INCOMING)
+  note       String?
+  arrivedAt  DateTime?
+  pickedUpAt DateTime?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  condo Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  user  User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([condoId])
+  @@index([userId])
+}
+
+model Invoice {
+  id        String        @id @default(cuid())
+  condoId   String
+  tenantId  String
+  period    String // เช่น "2026-01"
+  dueDate   DateTime
+  total     Int           @default(0)
+  status    PaymentStatus @default(PENDING)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  condo  Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  tenant User  @relation("InvoiceTenant", fields: [tenantId], references: [id], onDelete: Cascade)
+
+  items    InvoiceItem[]
+  payments Payment[]
+
+  @@unique([tenantId, period])
+  @@index([condoId])
+  @@index([tenantId])
+}
+
+model InvoiceItem {
+  id        String   @id @default(cuid())
+  invoiceId String
+  name      String
+  amount    Int
+  createdAt DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+model Payment {
+  id        String  @id @default(cuid())
+  condoId   String
+  userId    String?
+  invoiceId String?
+
+  amount Int
+  method PaymentMethod @default(TRANSFER)
+  status PaymentStatus @default(PENDING)
+  note   String?
+
+  paidAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  condo   Condo    @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  invoice Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@index([condoId])
+  @@index([userId])
+  @@index([invoiceId])
+}
+
+model ChatRoom {
+  id          String   @id @default(cuid())
+  condoId     String
+  name        String
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  condo     Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("ChatRoomCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  members  ChatMember[]
+  messages ChatMessage[]
+
+  @@unique([condoId, name])
+  @@index([condoId])
+}
+
+model ChatMember {
+  id       String   @id @default(cuid())
+  roomId   String
+  userId   String
+  joinedAt DateTime @default(now())
+
+  room ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@index([userId])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  roomId    String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+
+  room ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+  @@index([userId])
+}
+
+model Announcement {
+  id          String    @id @default(cuid())
+  condoId     String
+  title       String
+  content     String
+  createdById String?
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  condo     Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("AnnouncementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([condoId])
+  @@index([createdById])
+}
