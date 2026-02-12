@@ -82,13 +82,16 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  // Tenant 
+  // Tenant (ชี้ tenancy ปัจจุบัน)
   currentTenancyId String?  @unique
   currentTenancy   Tenancy? @relation("CurrentTenancy", fields: [currentTenancyId], references: [id])
 
-  // relations
-  ownedCondos   OwnerCondo[] // Owner -> many condos
-  tenancies     Tenancy[] 
+  // Owner <-> Condo ผ่านตารางกลาง
+  ownedCondos OwnerCondo[]
+
+  // Tenant history
+  tenancies Tenancy[]
+
   repairTickets RepairTicket[] @relation("RepairCreatedBy")
   parcels       Parcel[]
   payments      Payment[]
@@ -107,6 +110,8 @@ model Condo {
   name      String
   type      CondoType
   address   String?
+  city      String?
+  province  String?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
@@ -139,6 +144,25 @@ model OwnerCondo {
   @@index([condoId])
 }
 
+model Room {
+  id        String     @id @default(cuid())
+  condoId   String
+  number    String // เช่น A101
+  floor     Int?
+  type      String?
+  price     Int?
+  status    RoomStatus @default(AVAILABLE)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  condo         Condo          @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  tenancies     Tenancy[]
+  repairTickets RepairTicket[]
+
+  @@unique([condoId, number])
+  @@index([condoId])
+}
+
 model Building {
   id        String   @id @default(cuid())
   condoId   String
@@ -146,32 +170,10 @@ model Building {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  condo Condo  @relation(fields: [condoId], references: [id], onDelete: Cascade)
-  rooms Room[]
+  condo Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
 
   @@unique([condoId, name])
   @@index([condoId])
-}
-
-model Room {
-  id         String     @id @default(cuid())
-  condoId    String
-  buildingId String?
-  label      String // เช่น A-101
-  floor      Int?
-  status     RoomStatus @default(AVAILABLE)
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
-
-  condo    Condo     @relation(fields: [condoId], references: [id], onDelete: Cascade)
-  building Building? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
-
-  tenancies     Tenancy[]
-  repairTickets RepairTicket[]
-
-  @@unique([condoId, label])
-  @@index([condoId])
-  @@index([buildingId])
 }
 
 model Tenancy {
@@ -196,6 +198,11 @@ model Tenancy {
   @@index([condoId])
   @@index([roomId])
 }
+
+/**
+ * ที่เหลือ (RepairTicket, Facility, Invoice, Chat, Announcement, etc.)
+ * ใช้ของเดิมได้เลย — ไม่ต้องแก้ ถ้าไม่ได้อ้างถึง Property/Ownership
+ */
 
 model RepairTicket {
   id          String  @id @default(cuid())
@@ -251,8 +258,8 @@ model Facility {
   condoId     String
   name        String
   description String?
-  openTime    String? // "09:00"
-  closeTime   String? // "21:00"
+  openTime    String?
+  closeTime   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -321,7 +328,7 @@ model Invoice {
   items    InvoiceItem[]
   payments Payment[]
 
-  @@unique([tenantId, period])
+  @@unique([tenantId, condoId, period])
   @@index([condoId])
   @@index([tenantId])
 }
