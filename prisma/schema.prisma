@@ -430,3 +430,23 @@ model Announcement {
   @@index([condoId])
   @@index([createdById])
 }
+model RegisterRequest {
+  id                   String   @id @default(cuid())
+  role                 Role
+  name                 String?
+  email                String   @unique
+  phone                String
+
+  otpHash              String
+  otpExpiresAt         DateTime
+  otpVerifiedAt        DateTime?
+
+  emailTokenHash       String
+  emailTokenExpiresAt  DateTime
+  emailVerifiedAt      DateTime?
+
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+

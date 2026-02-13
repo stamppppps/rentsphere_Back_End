@@ -1,13 +1,11 @@
 import { Request, Response, NextFunction } from "express";
 
-export function requireRole(...roles: Array<"ADMIN" | "OWNER" | "TENANT">) {
+export function requireRole(roles: string[]) {
   return (req: Request, res: Response, next: NextFunction) => {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
-
+    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
     if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ message: "Forbidden" });
+      return res.status(403).json({ error: "Forbidden" });
     }
-
     next();
   };
 }
