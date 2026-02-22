@@ -1,276 +1,258 @@
 import { Router } from "express";
 import bcrypt from "bcrypt";
-//import jwt from "jsonwebtoken";
+import jwt, { type Secret, type SignOptions } from "jsonwebtoken";
 import { prisma } from "../prisma.js";
 import { authRequired } from "../middlewares/auth.js";
-import { randomOtp6, randomToken, sha256 } from "../utils/verify.js";
+import { randomOtp6, sha256 } from "../utils/verify.js";
 import { sendVerifyEmail } from "../utils/mailer.js";
+import { sendVerifySms } from "../utils/sms.js";
 
 const router = Router();
-
-
-
-import jwt, { type Secret, type SignOptions } from "jsonwebtoken";
 
 function parseExpiresInSeconds(v?: string): number {
   // รองรับ: "7d", "24h", "30m", "120s", หรือ "604800"
   if (!v) return 7 * 24 * 60 * 60;
-
   const raw = v.trim();
-
-  // ถ้าเป็นตัวเลขล้วน -> ถือว่าเป็นวินาที
   if (/^\d+$/.test(raw)) return Number(raw);
-
   const m = raw.match(/^(\d+)\s*([smhd])$/i);
   if (!m) return 7 * 24 * 60 * 60;
-
   const n = Number(m[1]);
   const unit = m[2].toLowerCase();
-
-  const mul =
-    unit === "s" ? 1 :
-    unit === "m" ? 60 :
-    unit === "h" ? 3600 :
-    86400; // d
-
+  const mul = unit === "s" ? 1 : unit === "m" ? 60 : unit === "h" ? 3600 : 86400;
   return n * mul;
 }
 
 function signToken(payload: { id: string; role: string }) {
   const secret = process.env.JWT_SECRET;
   if (!secret) throw new Error("JWT_SECRET is missing");
-
   const expiresInSeconds = parseExpiresInSeconds(process.env.JWT_EXPIRES_IN ?? "7d");
   const options: SignOptions = { expiresIn: expiresInSeconds };
-
   return jwt.sign(payload, secret as Secret, options);
 }
 
+function appUrl() {
+  return process.env.APP_URL || "http://localhost:5173";
+}
 
-
-
-
-
-// ===============================
-// B) REGISTER FLOW (OWNER only)
-// ===============================
-
-// 1) START: สร้าง registerRequest + ส่ง OTP (dev) + ส่ง email link
-router.post("/register/start", async (req, res) => {
+async function trySend(label: string, fn: () => Promise<void>) {
   try {
-    const { name, email, phone, role } = req.body as {
+    await fn();
+  } catch (err) {
+    if (process.env.NODE_ENV === "production") throw err;
+    console.error(`[dev]  failed but continuing:`, err);
+  }
+}
+
+// ==========================================================
+// Production Auth
+// Step 1: Register (ตั้งรหัสผ่านตั้งแต่แรก)
+// Step 2: Verify Email / Phone (เลือกช่องทางที่ต้องยืนยัน)
+// Step 3: Login ปกติ
+// ==========================================================
+
+// STEP 1) REGISTER
+router.post("/register", async (req, res) => {
+  try {
+    const { name, email, phone, password, role, verifyChannel } = req.body as {
       name?: string;
       email?: string;
       phone?: string;
+      password?: string;
       role?: "OWNER" | "TENANT" | "ADMIN";
+      verifyChannel?: "EMAIL" | "PHONE";
     };
 
-    if (!email || !phone || !role) {
-      return res.status(400).json({ error: "email, phone, role is required" });
+    if (!email || !password) {
+      return res.status(400).json({ error: "email and password are required" });
+    }
+    if (!phone) {
+      return res.status(400).json({ error: "phone is required" });
     }
 
-    // ตอนนี้ให้สมัครเองได้เฉพาะ OWNER
-    if (role !== "OWNER") {
-      return res.status(403).json({ error: "Only OWNER can start register" });
+    // ตอนนี้ให้สมัครเองได้เฉพาะ OWNER (กัน tenant/admin)
+    if ((role || "OWNER") !== "OWNER") {
+      return res.status(403).json({ error: "Only OWNER can register" });
     }
 
     const cleanEmail = String(email).trim().toLowerCase();
     const cleanPhone = String(phone).trim();
 
-    // กัน email ซ้ำ (มี user แล้ว)
-    const existedUser = await prisma.user.findUnique({ where: { email: cleanEmail } });
-    if (existedUser) return res.status(409).json({ error: "Email already exists" });
+    const existed = await prisma.user.findUnique({ where: { email: cleanEmail } });
+    if (existed) return res.status(409).json({ error: "Email already exists" });
 
-    // กัน request ซ้ำ (เผลอกดหลายรอบ) -> ลบของเก่าทิ้งหรืออัปเดต
-    const existedReq = await prisma.registerRequest.findUnique({ where: { email: cleanEmail } });
-    if (existedReq) {
-      // ลบทิ้งแล้วสร้างใหม่ให้ flow ง่าย (หรือจะ update ก็ได้)
-      await prisma.registerRequest.delete({ where: { email: cleanEmail } }).catch(() => {});
-    }
+    const passwordHash = await bcrypt.hash(String(password), 10);
 
-    const otp = randomOtp6();
-    const otpHash = sha256(otp);
+    const channel = (verifyChannel || "EMAIL").toUpperCase() === "PHONE" ? "PHONE" : "EMAIL";
 
-    const emailToken = randomToken();
-    const emailTokenHash = sha256(emailToken);
-
-    const otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 นาที
-    const emailTokenExpiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 นาที
-
-    const request = await prisma.registerRequest.create({
+    const user = await prisma.user.create({
       data: {
-        role,
-        name: name?.trim() || null,
         email: cleanEmail,
+        passwordHash,
+        name: name?.trim() || null,
         phone: cleanPhone,
-        otpHash,
-        otpExpiresAt,
-        emailTokenHash,
-        emailTokenExpiresAt,
+        role: "OWNER",
+        verifyChannel: channel as any,
       },
-      select: { id: true, email: true, phone: true, otpExpiresAt: true, emailTokenExpiresAt: true },
+      select: { id: true, email: true, phone: true, role: true, verifyChannel: true },
     });
 
-    // ✅ ส่ง OTP (ตอน dev: log)
-    console.log("📲 OTP (dev):", otp, "for", cleanPhone);
+    // สร้าง verify request + ส่งโค้ด
+    const code = randomOtp6();
+    const codeHash = sha256(code);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 นาที
 
-   
-    const appUrl = process.env.APP_URL || "http://localhost:5174";
-    // หน้า FE ที่ไว้โชว์ผล verify (แนะนำให้ FE ทำหน้า /auth/owner/verify-email)
-    const verifyLink = `${appUrl}/auth/owner/verify-email?token=${emailToken}`;
+    const vr = await prisma.verifyRequest.create({
+      data: {
+        userId: user.id,
+        channel: channel as any,
+        emailCodeHash: channel === "EMAIL" ? codeHash : null,
+        phoneOtpHash: channel === "PHONE" ? codeHash : null,
+        expiresAt,
+      },
+      select: { id: true, channel: true, expiresAt: true },
+    });
 
-    await sendVerifyEmail(cleanEmail, verifyLink);
+    if (channel === "EMAIL") {
+      await trySend("sendVerifyEmail", () =>
+        sendVerifyEmail(cleanEmail, {
+          code,
+          verifyUrl: `${appUrl()}/auth/owner/verify-email?requestId=${vr.id}`,
+        })
+      );
+      console.log("Email code (dev):", code, "for", cleanEmail);
+    } else {
+      await trySend("sendVerifySms", () => sendVerifySms(cleanPhone, code));
+      console.log("SMS OTP (dev):", code, "for", cleanPhone);
+    }
 
     return res.status(201).json({
-      requestId: request.id,
-      otpExpiresAt: request.otpExpiresAt,
-      emailTokenExpiresAt: request.emailTokenExpiresAt,
-      message: "OTP sent and email verification link sent",
+      requestId: vr.id,
+      channel: vr.channel,
+      expiresAt: vr.expiresAt,
+      message: "Registered. Verification code sent.",
     });
   } catch (e) {
     console.error(e);
-    return res.status(500).json({ error: "Start register failed" });
+    return res.status(500).json({ error: "Register failed" });
   }
 });
 
-// 2) VERIFY OTP
-router.post("/register/verify-otp", async (req, res) => {
+// STEP 2A) VERIFY EMAIL
+router.post("/verify/email", async (req, res) => {
   try {
-    const { requestId, otp } = req.body as { requestId?: string; otp?: string };
-    if (!requestId || !otp) {
-      return res.status(400).json({ error: "requestId and otp is required" });
-    }
+    const { requestId, code } = req.body as { requestId?: string; code?: string };
+    if (!requestId || !code) return res.status(400).json({ error: "requestId and code are required" });
 
-    const reqRow = await prisma.registerRequest.findUnique({ where: { id: requestId } });
-    if (!reqRow) return res.status(404).json({ error: "Request not found" });
+    const vr = await prisma.verifyRequest.findUnique({ where: { id: String(requestId) } });
+    if (!vr) return res.status(404).json({ error: "Verify request not found" });
+    if (vr.channel !== "EMAIL") return res.status(400).json({ error: "This request is not EMAIL verification" });
+    if (new Date() > vr.expiresAt) return res.status(400).json({ error: "Code expired" });
 
-    if (reqRow.otpVerifiedAt) return res.json({ ok: true });
+    const ok = sha256(String(code).trim()) === (vr.emailCodeHash || "");
+    if (!ok) return res.status(401).json({ error: "Invalid code" });
 
-    if (new Date() > reqRow.otpExpiresAt) {
-      return res.status(400).json({ error: "OTP expired" });
-    }
-
-    const ok = sha256(String(otp)) === reqRow.otpHash;
-    if (!ok) return res.status(401).json({ error: "Invalid OTP" });
-
-    await prisma.registerRequest.update({
-      where: { id: requestId },
-      data: { otpVerifiedAt: new Date() },
+    await prisma.user.update({
+      where: { id: vr.userId },
+      data: { emailVerifiedAt: new Date() },
     });
+    await prisma.verifyRequest.delete({ where: { id: vr.id } }).catch(() => {});
 
     return res.json({ ok: true });
   } catch (e) {
     console.error(e);
-    return res.status(500).json({ error: "Verify OTP failed" });
+    return res.status(500).json({ error: "Verify email failed" });
   }
 });
 
-// 3) VERIFY EMAIL (ลิงก์จากอีเมล)
-// - ทำเป็น redirect กลับ FE ให้สวย ๆ
-router.get("/register/verify-email", async (req, res) => {
+// STEP 2B) VERIFY PHONE
+router.post("/verify/phone", async (req, res) => {
   try {
-    const token = String(req.query.token || "");
-    if (!token) return res.status(400).send("Missing token");
+    const { requestId, otp } = req.body as { requestId?: string; otp?: string };
+    if (!requestId || !otp) return res.status(400).json({ error: "requestId and otp are required" });
 
-    const tokenHash = sha256(token);
+    const vr = await prisma.verifyRequest.findUnique({ where: { id: String(requestId) } });
+    if (!vr) return res.status(404).json({ error: "Verify request not found" });
+    if (vr.channel !== "PHONE") return res.status(400).json({ error: "This request is not PHONE verification" });
+    if (new Date() > vr.expiresAt) return res.status(400).json({ error: "OTP expired" });
 
-    const reqRow = await prisma.registerRequest.findFirst({
-      where: { emailTokenHash: tokenHash },
+    const ok = sha256(String(otp).trim()) === (vr.phoneOtpHash || "");
+    if (!ok) return res.status(401).json({ error: "Invalid OTP" });
+
+    await prisma.user.update({
+      where: { id: vr.userId },
+      data: { phoneVerifiedAt: new Date() },
     });
-    if (!reqRow) {
-      const appUrl = process.env.APP_URL || "http://localhost:5174";
-      return res.redirect(`${appUrl}/auth/owner/verify-email?status=invalid`);
-    }
+    await prisma.verifyRequest.delete({ where: { id: vr.id } }).catch(() => {});
 
-    const appUrl = process.env.APP_URL || "http://localhost:5174";
-
-    if (reqRow.emailVerifiedAt) {
-      return res.redirect(`${appUrl}/auth/owner/verify-email?status=already`);
-    }
-
-    if (new Date() > reqRow.emailTokenExpiresAt) {
-      return res.redirect(`${appUrl}/auth/owner/verify-email?status=expired`);
-    }
-
-    await prisma.registerRequest.update({
-      where: { id: reqRow.id },
-      data: { emailVerifiedAt: new Date() },
-    });
-
-    return res.redirect(`${appUrl}/auth/owner/verify-email?status=ok`);
+    return res.json({ ok: true });
   } catch (e) {
     console.error(e);
-    return res.status(500).send("Verify email failed");
+    return res.status(500).json({ error: "Verify phone failed" });
   }
 });
 
-// 4) COMPLETE: สร้าง user จริง หลัง otp+email ผ่านแล้ว
-router.post("/register/complete", async (req, res) => {
+// RESEND verification code
+router.post("/verify/resend", async (req, res) => {
   try {
-    const { requestId, password } = req.body as { requestId?: string; password?: string };
-    if (!requestId || !password) {
-      return res.status(400).json({ error: "requestId and password is required" });
-    }
+    const { requestId } = req.body as { requestId?: string };
+    if (!requestId) return res.status(400).json({ error: "requestId is required" });
 
-    const reqRow = await prisma.registerRequest.findUnique({ where: { id: requestId } });
-    if (!reqRow) return res.status(404).json({ error: "Request not found" });
+    const vr = await prisma.verifyRequest.findUnique({ where: { id: String(requestId) }, include: { user: true } });
+    if (!vr) return res.status(404).json({ error: "Verify request not found" });
 
-    if (reqRow.role !== "OWNER") {
-      return res.status(403).json({ error: "Only OWNER can complete register" });
-    }
+    const code = randomOtp6();
+    const codeHash = sha256(code);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    if (!reqRow.otpVerifiedAt) return res.status(400).json({ error: "OTP not verified" });
-    if (!reqRow.emailVerifiedAt) return res.status(400).json({ error: "Email not verified" });
-
-    // กันสร้างซ้ำ
-    const existed = await prisma.user.findUnique({ where: { email: reqRow.email } });
-    if (existed) return res.status(409).json({ error: "Email already exists" });
-
-    const passwordHash = await bcrypt.hash(password, 10);
-
-    const user = await prisma.user.create({
+    await prisma.verifyRequest.update({
+      where: { id: vr.id },
       data: {
-        email: reqRow.email,
-        passwordHash,
-        name: reqRow.name || null,
-        phone: reqRow.phone || null,
-        role: reqRow.role,
+        expiresAt,
+        emailCodeHash: vr.channel === "EMAIL" ? codeHash : null,
+        phoneOtpHash: vr.channel === "PHONE" ? codeHash : null,
       },
-      select: { id: true, email: true, name: true, phone: true, role: true },
     });
 
-    const token = signToken({ id: user.id, role: user.role });
+    if (vr.channel === "EMAIL") {
+      await trySend("sendVerifyEmail", () =>
+        sendVerifyEmail(vr.user.email, {
+          code,
+          verifyUrl: `${appUrl()}/auth/owner/verify-email?requestId=${vr.id}`,
+        })
+      );
+      console.log("Email code (dev):", code, "for", vr.user.email);
+    } else {
+      await trySend("sendVerifySms", () => sendVerifySms(vr.user.phone || "", code));
+      console.log("SMS OTP (dev):", code, "for", vr.user.phone);
+    }
 
-    // ล้าง request ทิ้งได้
-    await prisma.registerRequest.delete({ where: { id: requestId } }).catch(() => {});
-
-    return res.status(201).json({ user, token });
+    return res.json({ ok: true, expiresAt });
   } catch (e) {
     console.error(e);
-    return res.status(500).json({ error: "Complete register failed" });
+    return res.status(500).json({ error: "Resend failed" });
   }
 });
 
-// ===============================
-// LOGIN
-// ===============================
+// STEP 3) LOGIN (ต้อง verify ตาม channel ก่อน)
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body as { email?: string; password?: string };
-    if (!email || !password) {
-      return res.status(400).json({ error: "email and password is required" });
-    }
+    if (!email || !password) return res.status(400).json({ error: "email and password are required" });
 
     const cleanEmail = String(email).trim().toLowerCase();
-
     const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
     if (!user || !user.passwordHash) return res.status(401).json({ error: "Invalid credentials" });
 
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ error: "Invalid credentials" });
 
-    const token = signToken({ id: user.id, role: user.role });
+    const need = user.verifyChannel;
+    const verified = need === "EMAIL" ? !!user.emailVerifiedAt : !!user.phoneVerifiedAt;
+    if (!verified) {
+      return res.status(403).json({ error: `Please verify your ${need.toLowerCase()} first` });
+    }
 
+    const token = signToken({ id: user.id, role: user.role });
     return res.json({
       user: { id: user.id, email: user.email, name: user.name, role: user.role },
       token,
@@ -281,9 +263,97 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// ===============================
-// ME + LOGOUT (เหมือนเดิม)
-// ===============================
+// ==========================================================
+// Forgot password (Production)
+// ==========================================================
+
+router.post("/password/forgot", async (req, res) => {
+  try {
+    const { identifier, channel } = req.body as { identifier?: string; channel?: "EMAIL" | "PHONE" };
+    if (!identifier) return res.status(400).json({ error: "identifier is required" });
+
+    const ch = (channel || "EMAIL").toUpperCase() === "PHONE" ? "PHONE" : "EMAIL";
+
+    const user =
+      ch === "EMAIL"
+        ? await prisma.user.findUnique({ where: { email: String(identifier).trim().toLowerCase() } })
+        : await prisma.user.findFirst({ where: { phone: String(identifier).trim() } });
+
+    // production ปกติไม่บอกว่าเจอ user หรือไม่ (กัน enumerate)
+    if (!user) return res.json({ ok: true });
+
+    // สร้าง code สำหรับ reset
+    const code = randomOtp6();
+    const codeHash = sha256(code);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    // ลบ request เก่าของ user ทิ้ง (กันสแปม)
+    await prisma.passwordResetRequest.deleteMany({ where: { userId: user.id } }).catch(() => {});
+
+    const pr = await prisma.passwordResetRequest.create({
+      data: {
+        userId: user.id,
+        channel: ch as any,
+        codeHash,
+        expiresAt,
+      },
+      select: { id: true, channel: true, expiresAt: true },
+    });
+
+    if (ch === "EMAIL") {
+      await trySend("sendVerifyEmail", () =>
+        sendVerifyEmail(user.email, {
+          code,
+          verifyUrl: `${appUrl()}/auth/owner/reset?requestId=${pr.id}&channel=EMAIL`,
+        })
+      );
+      console.log("Reset code (dev):", code, "for", user.email);
+    } else {
+      await trySend("sendVerifySms", () => sendVerifySms(user.phone || "", code));
+      console.log("Reset OTP (dev):", code, "for", user.phone);
+    }
+
+    return res.json({ ok: true, requestId: pr.id, channel: pr.channel, expiresAt: pr.expiresAt });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Forgot password failed" });
+  }
+});
+
+router.post("/password/reset", async (req, res) => {
+  try {
+    const { requestId, code, newPassword } = req.body as {
+      requestId?: string;
+      code?: string;
+      newPassword?: string;
+    };
+    if (!requestId || !code || !newPassword) {
+      return res.status(400).json({ error: "requestId, code and newPassword are required" });
+    }
+
+    const pr = await prisma.passwordResetRequest.findUnique({ where: { id: String(requestId) } });
+    if (!pr) return res.status(404).json({ error: "Reset request not found" });
+    if (pr.usedAt) return res.status(400).json({ error: "Reset request already used" });
+    if (new Date() > pr.expiresAt) return res.status(400).json({ error: "Code expired" });
+
+    const ok = sha256(String(code).trim()) === pr.codeHash;
+    if (!ok) return res.status(401).json({ error: "Invalid code" });
+
+    const passwordHash = await bcrypt.hash(String(newPassword), 10);
+    await prisma.user.update({ where: { id: pr.userId }, data: { passwordHash } });
+    await prisma.passwordResetRequest.update({ where: { id: pr.id }, data: { usedAt: new Date() } });
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Reset password failed" });
+  }
+});
+
+// ==========================================================
+// ME + LOGOUT
+// ==========================================================
+
 router.get("/me", authRequired, async (req, res) => {
   const userId = req.user!.id;
   const user = await prisma.user.findUnique({
@@ -296,11 +366,5 @@ router.get("/me", authRequired, async (req, res) => {
 router.post("/logout", (_req, res) => {
   return res.json({ ok: true });
 });
-
-// ===============================
-// ❌ IMPORTANT: ปิด register แบบเดิม
-// ===============================
-// ถ้าเธอมีโค้ด router.post("/register") เดิม -> ลบทิ้ง/คอมเมนต์ทิ้งให้หมด
-// เพื่อไม่ให้สมัครข้ามขั้นได้
 
 export default router;
