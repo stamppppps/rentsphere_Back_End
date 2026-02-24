@@ -4,7 +4,7 @@ import { requireRole } from "../middlewares/requireRole.js";
 
 const router = Router();
 
-router.use(mockAuth, requireRole("TENANT"));
+router.use(mockAuth,requireRole(["TENANT"]));
 
 router.get("/me", (req, res) => {
   res.json({

@@ -4,7 +4,7 @@ import { requireRole } from "../middlewares/requireRole.js";
 
 const router = Router();
 
-router.use(mockAuth, requireRole("ADMIN"));
+router.use(mockAuth, requireRole(["ADMIN"]));
 
 router.get("/me", (req, res) => {
   res.json({ message: "ADMIN OK", user: req.user });

@@ -1,75 +1,73 @@
-generator client {
+generator client{
   provider = "prisma-client-js"
 }
 
-datasource db {
+datasource db{
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-//////////////////////////////
 // Enums
-//////////////////////////////
 
-enum Role {
+enum Role{
   ADMIN
   OWNER
   STAFF
   TENANT
 }
 
-enum VerifyChannel {
+enum VerifyChannel{
   EMAIL
   PHONE
 }
 
-enum CondoStatus {
+enum CondoStatus{
   ACTIVE
   INACTIVE
 }
 
-enum AssetType {
+enum AssetType{
   LOGO
   COVER
   GALLERY
   DOCUMENT
 }
 
-enum UtilityType {
+enum UtilityType{
   WATER
   ELECTRIC
 }
 
-enum BillingCycle {
+enum BillingCycle{
   MONTHLY
   ONE_TIME
 }
 
-enum OccupancyStatus {
+enum OccupancyStatus{
   VACANT
   OCCUPIED
   RESERVED
 }
 
-enum RoomStatus {
+enum RoomStatus{
   NORMAL
   MAINTENANCE
   BLOCKED
 }
 
-enum CodeStatus {
+enum CodeStatus{
   ACTIVE
   USED
   EXPIRED
   DISABLED
 }
 
-enum ResidencyStatus {
+enum ResidencyStatus{
   ACTIVE
   ENDED
 }
 
-enum ReservationStatus {
+enum ReservationStatus{
   PENDING
   CONFIRMED
   CANCELLED
@@ -77,13 +75,13 @@ enum ReservationStatus {
   CONVERTED_TO_CONTRACT
 }
 
-enum ContractStatus {
+enum ContractStatus{
   ACTIVE
   ENDED
   CANCELLED
 }
 
-enum PermissionModule {
+enum PermissionModule{
   DASHBOARD
   ROOMS
   BILLING
@@ -97,27 +95,27 @@ enum PermissionModule {
   STAFF
 }
 
-enum AnnouncementStatus {
+enum AnnouncementStatus{
   DRAFT
   PUBLISHED
   ARCHIVED
 }
 
-enum ChatMessageType {
+enum ChatMessageType{
   TEXT
   IMAGE
   FILE
   SYSTEM
 }
 
-enum RepairPriority {
+enum RepairPriority{
   LOW
   NORMAL
   HIGH
   URGENT
 }
 
-enum RepairStatus {
+enum RepairStatus{
   OPEN
   IN_PROGRESS
   WAITING_PARTS
@@ -125,26 +123,26 @@ enum RepairStatus {
   CANCELLED
 }
 
-enum AttachmentType {
+enum AttachmentType{
   IMAGE
   VIDEO
   OTHER
 }
 
-enum ParcelStatus {
+enum ParcelStatus{
   RECEIVED
   NOTIFIED
   PICKED_UP
   RETURNED
 }
 
-enum NotifyChannel {
+enum NotifyChannel{
   LINE
   SMS
   EMAIL
 }
 
-enum FacilityBookingStatus {
+enum FacilityBookingStatus{
   PENDING
   APPROVED
   REJECTED
@@ -152,24 +150,24 @@ enum FacilityBookingStatus {
   COMPLETED
 }
 
-enum FacilityBookingUpdateType {
+enum FacilityBookingUpdateType{
   COMMENT
   STATUS_CHANGE
   APPROVAL
 }
 
-enum MeterCycleStatus {
+enum MeterCycleStatus{
   OPEN
   CLOSED
 }
 
-enum MeterReadingStatus {
+enum MeterReadingStatus{
   PENDING
   SUBMITTED
   APPROVED
 }
 
-enum InvoiceStatus {
+enum InvoiceStatus{
   DRAFT
   ISSUED
   PAID
@@ -177,7 +175,7 @@ enum InvoiceStatus {
   CANCELLED
 }
 
-enum InvoiceItemType {
+enum InvoiceItemType{
   RENT
   WATER
   ELECTRIC
@@ -189,25 +187,25 @@ enum InvoiceItemType {
   FACILITY
 }
 
-enum PaymentMethod {
+enum PaymentMethod{
   TRANSFER
   PROMPTPAY
   CASH
 }
 
-enum PaymentNoticeStatus {
+enum PaymentNoticeStatus{
   PENDING
   APPROVED
   REJECTED
 }
 
-enum PaymentTxnStatus {
+enum PaymentTxnStatus{
   PENDING
   CONFIRMED
   VOID
 }
 
-enum TenantNotificationType {
+enum TenantNotificationType{
   ANNOUNCE
   INVOICE
   PAYMENT
@@ -217,28 +215,26 @@ enum TenantNotificationType {
   CHAT
 }
 
-enum OnboardingChannel {
+enum OnboardingChannel{
   LINE
   WEB
 }
 
-enum OnboardingEventType {
+enum OnboardingEventType{
   ENTER_CODE
   LINK_SUCCESS
   LINK_FAILED
 }
 
-enum RepairUpdateType {
+enum RepairUpdateType{
   COMMENT
   STATUS_CHANGE
   ASSIGNMENT
   SCHEDULE
 }
 
-//////////////////////////////
-// 0) Core / Users / Platform Admin
-//////////////////////////////
 
+// 0)Core / Users / Platform Admin
 model User {
   id           String  @id @default(uuid()) @db.Uuid
   email        String? @unique
@@ -306,7 +302,6 @@ model User {
 
   onboardingEvents TenantOnboardingEvent[] @relation("TenantOnboardingUser")
 
-  // ✅ Added missing opposite relations (fix validate errors)
   roomStatusChanges RoomStatusHistory[] @relation("RoomStatusChangedBy")
 
   rentalContracts RentalContract[] @relation("ContractTenant")
@@ -325,7 +320,7 @@ model User {
   passwordResetRequests PasswordResetRequest[]
 }
 
-model AuditLog {
+model AuditLog{
   id          String  @id @default(uuid()) @db.Uuid
   actorUserId String? @db.Uuid
   action      String
@@ -338,16 +333,15 @@ model AuditLog {
 
   createdAt DateTime @default(now())
 
-  actor User? @relation("AuditActor", fields: [actorUserId], references: [id])
+  actor User? @relation("AuditActor",fields: [actorUserId], references: [id])
 
   @@index([actorUserId])
 }
 
-//////////////////////////////
-// Auth flows
-//////////////////////////////
 
-model VerifyRequest {
+// Auth flows
+
+model VerifyRequest{
   id      String        @id @default(uuid()) @db.Uuid
   userId  String        @db.Uuid
   channel VerifyChannel
@@ -364,7 +358,7 @@ model VerifyRequest {
   @@index([userId])
 }
 
-model PasswordResetRequest {
+model PasswordResetRequest{
   id        String        @id @default(uuid()) @db.Uuid
   userId    String        @db.Uuid
   channel   VerifyChannel
@@ -380,11 +374,11 @@ model PasswordResetRequest {
   @@index([userId])
 }
 
-//////////////////////////////
-// 1) Condo + Assets + Bank + Utility
-//////////////////////////////
 
-model Condo {
+//1) Condo + Assets + Bank + Utility
+
+
+model Condo{
   id          String @id @default(uuid()) @db.Uuid
   ownerUserId String @db.Uuid
 
@@ -419,7 +413,7 @@ model Condo {
 
   staffInvites             StaffInvite[]
   staffMemberships         StaffMembership[]
-  staffPermissionTemplates StaffPermissionTemplate[] // ✅ opposite for StaffPermissionTemplate.condo
+  staffPermissionTemplates StaffPermissionTemplate[] 
 
   announcements Announcement[]
   chatRooms     ChatRoom[]
@@ -448,7 +442,7 @@ model Condo {
   @@index([ownerUserId])
 }
 
-model CondoAsset {
+model CondoAsset{
   id      String @id @default(uuid()) @db.Uuid
   condoId String @db.Uuid
 
@@ -469,7 +463,7 @@ model CondoAsset {
   @@index([condoId])
 }
 
-model CondoBankAccount {
+model CondoBankAccount{
   id      String @id @default(uuid()) @db.Uuid
   condoId String @db.Uuid
 
@@ -488,7 +482,7 @@ model CondoBankAccount {
   @@index([condoId])
 }
 
-model UtilitySetting {
+model UtilitySetting{
   id      String @id @default(uuid()) @db.Uuid
   condoId String @unique @db.Uuid
 
@@ -501,7 +495,7 @@ model UtilitySetting {
   condo Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
 }
 
-model UtilityRate {
+model UtilityRate{
   id          String      @id @default(uuid()) @db.Uuid
   condoId     String      @db.Uuid
   utilityType UtilityType
@@ -517,11 +511,11 @@ model UtilityRate {
   @@index([condoId, utilityType])
 }
 
-//////////////////////////////
-// 4) Charges
-//////////////////////////////
 
-model ChargeCatalog {
+// 4) Charges
+
+
+model ChargeCatalog{
   id          String  @id @default(uuid()) @db.Uuid
   code        String  @unique
   nameTh      String
@@ -531,7 +525,7 @@ model ChargeCatalog {
   condoCharges CondoCharge[]
 }
 
-model CondoCharge {
+model CondoCharge{
   id        String @id @default(uuid()) @db.Uuid
   condoId   String @db.Uuid
   catalogId String @db.Uuid
@@ -552,7 +546,7 @@ model CondoCharge {
   @@index([catalogId])
 }
 
-model RoomCharge {
+model RoomCharge{
   id            String @id @default(uuid()) @db.Uuid
   roomId        String @db.Uuid
   condoChargeId String @db.Uuid
@@ -571,7 +565,7 @@ model RoomCharge {
   @@index([condoChargeId])
 }
 
-model ExtraChargeTemplate {
+model ExtraChargeTemplate{
   id      String @id @default(uuid()) @db.Uuid
   condoId String @db.Uuid
 
@@ -591,7 +585,7 @@ model ExtraChargeTemplate {
   @@index([condoId])
 }
 
-model RoomExtraChargeAssignment {
+model RoomExtraChargeAssignment{
   id         String @id @default(uuid()) @db.Uuid
   roomId     String @db.Uuid
   templateId String @db.Uuid
@@ -610,11 +604,11 @@ model RoomExtraChargeAssignment {
   @@index([templateId])
 }
 
-//////////////////////////////
-// 5) Rooms + Meters + Status histories
-//////////////////////////////
 
-model Room {
+// 5)Rooms + Meters + Status histories
+
+
+model Room{
   id      String @id @default(uuid()) @db.Uuid
   condoId String @db.Uuid
 
@@ -660,7 +654,7 @@ model Room {
   @@index([condoId])
 }
 
-model RoomStatusHistory {
+model RoomStatusHistory{
   id     String @id @default(uuid()) @db.Uuid
   roomId String @db.Uuid
 
@@ -679,7 +673,7 @@ model RoomStatusHistory {
   @@index([roomId])
 }
 
-model RoomMeter {
+model RoomMeter{
   id     String @id @default(uuid()) @db.Uuid
   roomId String @unique @db.Uuid
 
@@ -692,11 +686,10 @@ model RoomMeter {
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
 }
 
-//////////////////////////////
-// 6) Tenant Identity + Residency + Codes
-//////////////////////////////
 
-model TenantProfile {
+//6) Tenant Identity + Residency + Codes
+
+model TenantProfile{
   id     String @id @default(uuid()) @db.Uuid
   userId String @unique @db.Uuid
 
@@ -715,7 +708,7 @@ model TenantProfile {
   emergencyContacts TenantEmergencyContact[]
 }
 
-model TenantEmergencyContact {
+model TenantEmergencyContact{
   id              String @id @default(uuid()) @db.Uuid
   tenantProfileId String @db.Uuid
 
@@ -731,7 +724,7 @@ model TenantEmergencyContact {
   @@index([tenantProfileId])
 }
 
-model LineAccount {
+model LineAccount{
   id     String @id @default(uuid()) @db.Uuid
   userId String @unique @db.Uuid
 
@@ -744,10 +737,10 @@ model LineAccount {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  onboardingEvents TenantOnboardingEvent[] // ✅ opposite for TenantOnboardingEvent.lineAccount
+  onboardingEvents TenantOnboardingEvent[] 
 }
 
-model TenantRoomCode {
+model TenantRoomCode{
   id         String  @id @default(uuid()) @db.Uuid
   condoId    String  @db.Uuid
   roomId     String  @db.Uuid
@@ -777,7 +770,7 @@ model TenantRoomCode {
   @@index([contractId])
 }
 
-model TenantResidency {
+model TenantResidency{
   id           String  @id @default(uuid()) @db.Uuid
   tenantUserId String  @db.Uuid
   condoId      String  @db.Uuid
@@ -801,7 +794,7 @@ model TenantResidency {
   @@index([contractId])
 }
 
-model TenantOnboardingEvent {
+model TenantOnboardingEvent{
   id            String  @id @default(uuid()) @db.Uuid
   tenantUserId  String? @db.Uuid
   lineAccountId String? @db.Uuid
@@ -822,11 +815,9 @@ model TenantOnboardingEvent {
   @@index([roomCodeId])
 }
 
-//////////////////////////////
-// 7) Reservation + Contract
-//////////////////////////////
 
-model RoomReservation {
+// 7) Reservation + Contract
+model RoomReservation{
   id      String @id @default(uuid()) @db.Uuid
   condoId String @db.Uuid
   roomId  String @db.Uuid
@@ -853,7 +844,7 @@ model RoomReservation {
   @@index([roomId])
 }
 
-model RentalContract {
+model RentalContract{
   id           String @id @default(uuid()) @db.Uuid
   condoId      String @db.Uuid
   roomId       String @db.Uuid
@@ -877,7 +868,7 @@ model RentalContract {
 
   condo  Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
   room   Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  tenant User  @relation("ContractTenant", fields: [tenantUserId], references: [id], onDelete: Cascade) // ✅ named relation
+  tenant User  @relation("ContractTenant", fields: [tenantUserId], references: [id], onDelete: Cascade) 
 
   reservation RoomReservation? @relation(fields: [reservationId], references: [id])
 
@@ -886,7 +877,6 @@ model RentalContract {
   invoices  Invoice[]
   chatRooms ChatRoom[]
 
-  // ✅ opposite relations for TenantRoomCode.contract + TenantResidency.contract
   tenantRoomCodes TenantRoomCode[]
   residencies     TenantResidency[]
 
@@ -896,7 +886,7 @@ model RentalContract {
   @@index([reservationId])
 }
 
-model ContractMonthlyCharge {
+model ContractMonthlyCharge{
   id         String @id @default(uuid()) @db.Uuid
   contractId String @db.Uuid
 
@@ -911,11 +901,10 @@ model ContractMonthlyCharge {
   @@index([contractId])
 }
 
-//////////////////////////////
-// 8) Staff / RBAC
-//////////////////////////////
 
-model StaffInvite {
+// 8) Staff / RBAC
+
+model StaffInvite{
   id      String @id @default(uuid()) @db.Uuid
   condoId String @db.Uuid
 
@@ -935,7 +924,7 @@ model StaffInvite {
   @@index([condoId])
 }
 
-model StaffMembership {
+model StaffMembership{
   id          String @id @default(uuid()) @db.Uuid
   staffUserId String @db.Uuid
   condoId     String @db.Uuid
@@ -961,7 +950,7 @@ model StaffMembership {
   @@index([condoId])
 }
 
-model PermissionCatalog {
+model PermissionCatalog{
   id       String           @id @default(uuid()) @db.Uuid
   code     String           @unique
   nameTh   String
@@ -972,7 +961,7 @@ model PermissionCatalog {
   overrides     StaffPermissionOverride[]
 }
 
-model StaffPermissionTemplate {
+model StaffPermissionTemplate{
   id      String @id @default(uuid()) @db.Uuid
   condoId String @db.Uuid
 
@@ -987,7 +976,7 @@ model StaffPermissionTemplate {
   @@index([condoId])
 }
 
-model StaffPermissionTemplateItem {
+model StaffPermissionTemplateItem{
   id           String  @id @default(uuid()) @db.Uuid
   templateId   String  @db.Uuid
   permissionId String  @db.Uuid
@@ -999,7 +988,7 @@ model StaffPermissionTemplateItem {
   @@unique([templateId, permissionId])
 }
 
-model StaffPermissionAssignment {
+model StaffPermissionAssignment{
   id           String   @id @default(uuid()) @db.Uuid
   membershipId String   @db.Uuid
   templateId   String?  @db.Uuid
@@ -1012,7 +1001,7 @@ model StaffPermissionAssignment {
   @@index([templateId])
 }
 
-model StaffPermissionOverride {
+model StaffPermissionOverride{
   id           String   @id @default(uuid()) @db.Uuid
   membershipId String   @db.Uuid
   permissionId String   @db.Uuid
@@ -1025,10 +1014,8 @@ model StaffPermissionOverride {
   @@unique([membershipId, permissionId])
 }
 
-//////////////////////////////
-// 9) Announcements + Reads
-//////////////////////////////
 
+// 9) Announcements + Reads
 model Announcement {
   id      String @id @default(uuid()) @db.Uuid
   condoId String @db.Uuid
@@ -1054,7 +1041,7 @@ model Announcement {
   @@index([condoId])
 }
 
-model AnnouncementRead {
+model AnnouncementRead{
   id             String   @id @default(uuid()) @db.Uuid
   announcementId String   @db.Uuid
   tenantUserId   String   @db.Uuid
@@ -1067,11 +1054,10 @@ model AnnouncementRead {
   @@index([tenantUserId])
 }
 
-//////////////////////////////
 // 10) Chat
-//////////////////////////////
 
-model ChatRoom {
+
+model ChatRoom{
   id         String  @id @default(uuid()) @db.Uuid
   condoId    String  @db.Uuid
   roomId     String? @db.Uuid
@@ -1091,7 +1077,7 @@ model ChatRoom {
   @@index([condoId])
 }
 
-model ChatRoomMember {
+model ChatRoomMember{
   id                String  @id @default(uuid()) @db.Uuid
   chatRoomId        String  @db.Uuid
   userId            String  @db.Uuid
@@ -1107,7 +1093,7 @@ model ChatRoomMember {
   @@unique([chatRoomId, userId])
 }
 
-model ChatMessage {
+model ChatMessage{
   id         String @id @default(uuid()) @db.Uuid
   chatRoomId String @db.Uuid
 
@@ -1126,7 +1112,7 @@ model ChatMessage {
   @@index([chatRoomId])
 }
 
-model ChatMessageRead {
+model ChatMessageRead{
   id        String   @id @default(uuid()) @db.Uuid
   messageId String   @db.Uuid
   userId    String   @db.Uuid
@@ -1138,11 +1124,10 @@ model ChatMessageRead {
   @@unique([messageId, userId])
 }
 
-//////////////////////////////
-// 11) Repair
-//////////////////////////////
 
-model RepairRequest {
+// 11) Repair
+
+model RepairRequest{
   id           String  @id @default(uuid()) @db.Uuid
   condoId      String  @db.Uuid
   roomId       String? @db.Uuid
@@ -1174,7 +1159,7 @@ model RepairRequest {
   @@index([condoId])
 }
 
-model RepairAttachment {
+model RepairAttachment{
   id       String @id @default(uuid()) @db.Uuid
   repairId String @db.Uuid
 
@@ -1189,7 +1174,7 @@ model RepairAttachment {
   @@index([repairId])
 }
 
-model RepairUpdate {
+model RepairUpdate{
   id       String @id @default(uuid()) @db.Uuid
   repairId String @db.Uuid
 
@@ -1208,11 +1193,11 @@ model RepairUpdate {
   @@index([repairId])
 }
 
-//////////////////////////////
-// 12) Parcels
-//////////////////////////////
 
-model Parcel {
+// 12) Parcels
+
+
+model Parcel{
   id           String  @id @default(uuid()) @db.Uuid
   condoId      String  @db.Uuid
   roomId       String? @db.Uuid
@@ -1244,7 +1229,7 @@ model Parcel {
   @@index([condoId])
 }
 
-model ParcelAttachment {
+model ParcelAttachment{
   id         String   @id @default(uuid()) @db.Uuid
   parcelId   String   @db.Uuid
   fileUrl    String
@@ -1257,7 +1242,7 @@ model ParcelAttachment {
   @@index([parcelId])
 }
 
-model ParcelNotification {
+model ParcelNotification{
   id       String @id @default(uuid()) @db.Uuid
   parcelId String @db.Uuid
 
@@ -1272,11 +1257,10 @@ model ParcelNotification {
   @@index([parcelId])
 }
 
-//////////////////////////////
 // 13) Facility Booking
-//////////////////////////////
 
-model Facility {
+
+model Facility{
   id      String @id @default(uuid()) @db.Uuid
   condoId String @db.Uuid
 
@@ -1296,7 +1280,7 @@ model Facility {
   @@index([condoId])
 }
 
-model FacilityBookingSetting {
+model FacilityBookingSetting{
   id         String @id @default(uuid()) @db.Uuid
   facilityId String @unique @db.Uuid
 
@@ -1318,7 +1302,7 @@ model FacilityBookingSetting {
   facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
 }
 
-model FacilityBooking {
+model FacilityBooking{
   id         String @id @default(uuid()) @db.Uuid
   condoId    String @db.Uuid
   facilityId String @db.Uuid
@@ -1357,7 +1341,7 @@ model FacilityBooking {
   @@index([facilityId])
 }
 
-model FacilityBookingUpdate {
+model FacilityBookingUpdate{
   id         String                    @id @default(uuid()) @db.Uuid
   bookingId  String                    @db.Uuid
   updateType FacilityBookingUpdateType
@@ -1373,11 +1357,11 @@ model FacilityBookingUpdate {
   @@index([bookingId])
 }
 
-//////////////////////////////
-// 14) Meter Reading
-//////////////////////////////
 
-model MeterCycle {
+// 14) Meter Reading
+
+
+model MeterCycle{
   id      String @id @default(uuid()) @db.Uuid
   condoId String @db.Uuid
 
@@ -1400,7 +1384,7 @@ model MeterCycle {
   @@index([condoId])
 }
 
-model MeterReading {
+model MeterReading{
   id      String @id @default(uuid()) @db.Uuid
   condoId String @db.Uuid
   roomId  String @db.Uuid
@@ -1433,7 +1417,7 @@ model MeterReading {
   @@index([condoId])
 }
 
-model MeterAttachment {
+model MeterAttachment{
   id             String   @id @default(uuid()) @db.Uuid
   meterReadingId String   @db.Uuid
   fileUrl        String
@@ -1444,9 +1428,9 @@ model MeterAttachment {
   @@index([meterReadingId])
 }
 
-//////////////////////////////
+
 // 15) Billing + Payments
-//////////////////////////////
+
 
 model Invoice {
   id         String  @id @default(uuid()) @db.Uuid
@@ -1486,7 +1470,7 @@ model Invoice {
   @@index([condoId])
 }
 
-model InvoiceItem {
+model InvoiceItem{
   id        String @id @default(uuid()) @db.Uuid
   invoiceId String @db.Uuid
 
@@ -1510,7 +1494,7 @@ model InvoiceItem {
   @@index([invoiceId])
 }
 
-model InvoiceMeterLink {
+model InvoiceMeterLink{
   id        String @id @default(uuid()) @db.Uuid
   invoiceId String @db.Uuid
   cycleId   String @db.Uuid
@@ -1521,7 +1505,7 @@ model InvoiceMeterLink {
   @@unique([invoiceId, cycleId])
 }
 
-model PaymentNotice {
+model PaymentNotice{
   id           String  @id @default(uuid()) @db.Uuid
   invoiceId    String  @db.Uuid
   tenantUserId String? @db.Uuid
@@ -1552,7 +1536,7 @@ model PaymentNotice {
   @@index([invoiceId])
 }
 
-model PaymentAttachment {
+model PaymentAttachment{
   id              String   @id @default(uuid()) @db.Uuid
   paymentNoticeId String   @db.Uuid
   fileUrl         String
@@ -1563,7 +1547,7 @@ model PaymentAttachment {
   @@index([paymentNoticeId])
 }
 
-model PaymentTransaction {
+model PaymentTransaction{
   id              String  @id @default(uuid()) @db.Uuid
   condoId         String  @db.Uuid
   invoiceId       String  @db.Uuid
@@ -1590,7 +1574,7 @@ model PaymentTransaction {
   @@index([invoiceId])
 }
 
-model PaymentUpdate {
+model PaymentUpdate{
   id              String               @id @default(uuid()) @db.Uuid
   paymentNoticeId String               @db.Uuid
   oldStatus       PaymentNoticeStatus?
@@ -1605,11 +1589,11 @@ model PaymentUpdate {
   @@index([paymentNoticeId])
 }
 
-//////////////////////////////
-// 16) Tenant Notifications
-//////////////////////////////
 
-model TenantNotification {
+// 16) Tenant Notifications
+
+
+model TenantNotification{
   id           String  @id @default(uuid()) @db.Uuid
   tenantUserId String  @db.Uuid
   condoId      String? @db.Uuid
@@ -1629,11 +1613,11 @@ model TenantNotification {
   @@index([tenantUserId])
 }
 
-//////////////////////////////
-// 17) Dashboard / Reports Snapshots
-//////////////////////////////
 
-model DashboardDailySnapshot {
+// 17) Dashboard / Reports Snapshots
+
+
+model DashboardDailySnapshot{
   id           String   @id @default(uuid()) @db.Uuid
   condoId      String   @db.Uuid
   snapshotDate DateTime @db.Date
@@ -1653,7 +1637,7 @@ model DashboardDailySnapshot {
   @@unique([condoId, snapshotDate])
 }
 
-model ReportMonthlySnapshot {
+model ReportMonthlySnapshot{
   id      String @id @default(uuid()) @db.Uuid
   condoId String @db.Uuid
 

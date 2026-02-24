@@ -2,8 +2,7 @@ import { Request, Response, NextFunction } from "express";
 
 type Role = "ADMIN" | "OWNER" | "TENANT";
 
-// ส่ง header: x-mock-user: OWNER:owner_1
-// หรือ            TENANT:tenant_1
+
 export function mockAuth(req: Request, res: Response, next: NextFunction) {
   const raw = req.header("x-mock-user") || "OWNER:owner_1";
 

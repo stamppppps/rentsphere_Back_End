@@ -22,7 +22,7 @@ function assertMailConfig() {
 function createTransporter() {
   const { host, port, user, pass } = getMailConfig();
 
-  // Gmail:
+  //Gmail:
   // - port 587 => secure=false (STARTTLS)
   // - port 465 => secure=true
   const secure = port === 465;
