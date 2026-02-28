@@ -97,6 +97,12 @@ CREATE TYPE "OnboardingEventType" AS ENUM ('ENTER_CODE', 'LINK_SUCCESS', 'LINK_F
 -- CreateEnum
 CREATE TYPE "RepairUpdateType" AS ENUM ('COMMENT', 'STATUS_CHANGE', 'ASSIGNMENT', 'SCHEDULE');
 
+-- CreateEnum
+CREATE TYPE "UtilityBillingType" AS ENUM ('METER', 'METER_MIN', 'FLAT');
+
+-- CreateEnum
+CREATE TYPE "CondoSetupStep" AS ENUM ('STEP_0', 'STEP_1', 'STEP_2', 'STEP_3', 'STEP_4', 'STEP_5', 'STEP_6', 'STEP_7', 'STEP_8', 'DONE');
+
 -- CreateTable
 CREATE TABLE "User" (
     "id" UUID NOT NULL,
@@ -162,20 +168,33 @@ CREATE TABLE "PasswordResetRequest" (
 CREATE TABLE "Condo" (
     "id" UUID NOT NULL,
     "ownerUserId" UUID NOT NULL,
-    "condoName" TEXT NOT NULL,
     "description" TEXT,
-    "addressLine1" TEXT,
-    "addressLine2" TEXT,
-    "province" TEXT,
-    "district" TEXT,
-    "subdistrict" TEXT,
-    "postcode" TEXT,
     "totalFloors" INTEGER,
     "status" "CondoStatus" NOT NULL DEFAULT 'ACTIVE',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3),
+    "addressEn" TEXT,
+    "addressTh" TEXT NOT NULL,
+    "nameEn" TEXT,
+    "nameTh" TEXT NOT NULL,
+    "phoneNumber" TEXT,
+    "taxId" TEXT,
 
     CONSTRAINT "Condo_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "CondoUtilitySetting" (
+    "id" TEXT NOT NULL,
+    "condoId" UUID NOT NULL,
+    "utilityType" "UtilityType" NOT NULL,
+    "billingType" "UtilityBillingType" NOT NULL,
+    "rate" DECIMAL(12,2) NOT NULL,
+    "createdBy" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "CondoUtilitySetting_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -195,6 +214,20 @@ CREATE TABLE "CondoAsset" (
 );
 
 -- CreateTable
+CREATE TABLE "CondoService" (
+    "id" TEXT NOT NULL,
+    "condoId" UUID NOT NULL,
+    "name" TEXT NOT NULL,
+    "price" DECIMAL(12,2) NOT NULL,
+    "isVariable" BOOLEAN NOT NULL DEFAULT false,
+    "variableType" TEXT NOT NULL DEFAULT 'NONE',
+    "createdBy" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "CondoService_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "CondoBankAccount" (
     "id" UUID NOT NULL,
     "condoId" UUID NOT NULL,
@@ -205,6 +238,49 @@ CREATE TABLE "CondoBankAccount" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "CondoBankAccount_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "CondoBillingSetting" (
+    "id" UUID NOT NULL,
+    "condoId" UUID NOT NULL,
+    "dueDay" INTEGER NOT NULL,
+    "acceptFine" BOOLEAN NOT NULL DEFAULT false,
+    "finePerDay" DECIMAL(12,2),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3),
+
+    CONSTRAINT "CondoBillingSetting_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "CondoOnboarding" (
+    "id" UUID NOT NULL,
+    "condoId" UUID NOT NULL,
+    "currentStep" "CondoSetupStep" NOT NULL DEFAULT 'STEP_0',
+    "basicDone" BOOLEAN NOT NULL DEFAULT false,
+    "chargesDone" BOOLEAN NOT NULL DEFAULT false,
+    "utilityDone" BOOLEAN NOT NULL DEFAULT false,
+    "bankDone" BOOLEAN NOT NULL DEFAULT false,
+    "roomsDone" BOOLEAN NOT NULL DEFAULT false,
+    "staffDone" BOOLEAN NOT NULL DEFAULT false,
+    "confirmDone" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3),
+
+    CONSTRAINT "CondoOnboarding_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "CondoFloor" (
+    "id" UUID NOT NULL,
+    "condoId" UUID NOT NULL,
+    "floorNo" INTEGER NOT NULL,
+    "label" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3),
+
+    CONSTRAINT "CondoFloor_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -741,8 +817,8 @@ CREATE TABLE "Facility" (
 CREATE TABLE "FacilityBookingSetting" (
     "id" UUID NOT NULL,
     "facilityId" UUID NOT NULL,
-    "openTime" TIME,
-    "closeTime" TIME,
+    "openTime" TIME(6),
+    "closeTime" TIME(6),
     "slotMinutes" INTEGER NOT NULL DEFAULT 60,
     "maxPeople" INTEGER,
     "maxBookingsPerDay" INTEGER,
@@ -765,8 +841,8 @@ CREATE TABLE "FacilityBooking" (
     "tenantUserId" UUID,
     "createdBy" UUID,
     "bookingDate" DATE NOT NULL,
-    "startTime" TIME NOT NULL,
-    "endTime" TIME NOT NULL,
+    "startTime" TIME(6) NOT NULL,
+    "endTime" TIME(6) NOT NULL,
     "peopleCount" INTEGER,
     "note" TEXT,
     "status" "FacilityBookingStatus" NOT NULL DEFAULT 'PENDING',
@@ -1013,10 +1089,34 @@ CREATE INDEX "PasswordResetRequest_userId_idx" ON "PasswordResetRequest"("userId
 CREATE INDEX "Condo_ownerUserId_idx" ON "Condo"("ownerUserId");
 
 -- CreateIndex
+CREATE INDEX "CondoUtilitySetting_condoId_idx" ON "CondoUtilitySetting"("condoId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CondoUtilitySetting_condoId_utilityType_key" ON "CondoUtilitySetting"("condoId", "utilityType");
+
+-- CreateIndex
 CREATE INDEX "CondoAsset_condoId_idx" ON "CondoAsset"("condoId");
 
 -- CreateIndex
+CREATE INDEX "CondoService_condoId_idx" ON "CondoService"("condoId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CondoService_condoId_name_key" ON "CondoService"("condoId", "name");
+
+-- CreateIndex
 CREATE INDEX "CondoBankAccount_condoId_idx" ON "CondoBankAccount"("condoId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CondoBillingSetting_condoId_key" ON "CondoBillingSetting"("condoId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CondoOnboarding_condoId_key" ON "CondoOnboarding"("condoId");
+
+-- CreateIndex
+CREATE INDEX "CondoFloor_condoId_idx" ON "CondoFloor"("condoId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CondoFloor_condoId_floorNo_key" ON "CondoFloor"("condoId", "floorNo");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "UtilitySetting_condoId_key" ON "UtilitySetting"("condoId");
@@ -1289,13 +1389,28 @@ ALTER TABLE "PasswordResetRequest" ADD CONSTRAINT "PasswordResetRequest_userId_f
 ALTER TABLE "Condo" ADD CONSTRAINT "Condo_ownerUserId_fkey" FOREIGN KEY ("ownerUserId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "CondoUtilitySetting" ADD CONSTRAINT "CondoUtilitySetting_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "CondoAsset" ADD CONSTRAINT "CondoAsset_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "CondoAsset" ADD CONSTRAINT "CondoAsset_uploadedBy_fkey" FOREIGN KEY ("uploadedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "CondoService" ADD CONSTRAINT "CondoService_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "CondoBankAccount" ADD CONSTRAINT "CondoBankAccount_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CondoBillingSetting" ADD CONSTRAINT "CondoBillingSetting_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CondoOnboarding" ADD CONSTRAINT "CondoOnboarding_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CondoFloor" ADD CONSTRAINT "CondoFloor_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "UtilitySetting" ADD CONSTRAINT "UtilitySetting_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1304,16 +1419,16 @@ ALTER TABLE "UtilitySetting" ADD CONSTRAINT "UtilitySetting_condoId_fkey" FOREIG
 ALTER TABLE "UtilityRate" ADD CONSTRAINT "UtilityRate_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "CondoCharge" ADD CONSTRAINT "CondoCharge_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "CondoCharge" ADD CONSTRAINT "CondoCharge_catalogId_fkey" FOREIGN KEY ("catalogId") REFERENCES "ChargeCatalog"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "RoomCharge" ADD CONSTRAINT "RoomCharge_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "CondoCharge" ADD CONSTRAINT "CondoCharge_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "RoomCharge" ADD CONSTRAINT "RoomCharge_condoChargeId_fkey" FOREIGN KEY ("condoChargeId") REFERENCES "CondoCharge"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RoomCharge" ADD CONSTRAINT "RoomCharge_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ExtraChargeTemplate" ADD CONSTRAINT "ExtraChargeTemplate_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1328,10 +1443,10 @@ ALTER TABLE "RoomExtraChargeAssignment" ADD CONSTRAINT "RoomExtraChargeAssignmen
 ALTER TABLE "Room" ADD CONSTRAINT "Room_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "RoomStatusHistory" ADD CONSTRAINT "RoomStatusHistory_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "RoomStatusHistory" ADD CONSTRAINT "RoomStatusHistory_changedBy_fkey" FOREIGN KEY ("changedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "RoomStatusHistory" ADD CONSTRAINT "RoomStatusHistory_changedBy_fkey" FOREIGN KEY ("changedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "RoomStatusHistory" ADD CONSTRAINT "RoomStatusHistory_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "RoomMeter" ADD CONSTRAINT "RoomMeter_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1349,31 +1464,28 @@ ALTER TABLE "LineAccount" ADD CONSTRAINT "LineAccount_userId_fkey" FOREIGN KEY (
 ALTER TABLE "TenantRoomCode" ADD CONSTRAINT "TenantRoomCode_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "TenantRoomCode" ADD CONSTRAINT "TenantRoomCode_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "TenantRoomCode" ADD CONSTRAINT "TenantRoomCode_contractId_fkey" FOREIGN KEY ("contractId") REFERENCES "RentalContract"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "TenantRoomCode" ADD CONSTRAINT "TenantRoomCode_usedByUserId_fkey" FOREIGN KEY ("usedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "TenantRoomCode" ADD CONSTRAINT "TenantRoomCode_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "TenantResidency" ADD CONSTRAINT "TenantResidency_tenantUserId_fkey" FOREIGN KEY ("tenantUserId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "TenantRoomCode" ADD CONSTRAINT "TenantRoomCode_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "TenantRoomCode" ADD CONSTRAINT "TenantRoomCode_usedByUserId_fkey" FOREIGN KEY ("usedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "TenantResidency" ADD CONSTRAINT "TenantResidency_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "TenantResidency" ADD CONSTRAINT "TenantResidency_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "TenantResidency" ADD CONSTRAINT "TenantResidency_contractId_fkey" FOREIGN KEY ("contractId") REFERENCES "RentalContract"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "TenantOnboardingEvent" ADD CONSTRAINT "TenantOnboardingEvent_tenantUserId_fkey" FOREIGN KEY ("tenantUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "TenantResidency" ADD CONSTRAINT "TenantResidency_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "TenantResidency" ADD CONSTRAINT "TenantResidency_tenantUserId_fkey" FOREIGN KEY ("tenantUserId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "TenantOnboardingEvent" ADD CONSTRAINT "TenantOnboardingEvent_lineAccountId_fkey" FOREIGN KEY ("lineAccountId") REFERENCES "LineAccount"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -1382,25 +1494,28 @@ ALTER TABLE "TenantOnboardingEvent" ADD CONSTRAINT "TenantOnboardingEvent_lineAc
 ALTER TABLE "TenantOnboardingEvent" ADD CONSTRAINT "TenantOnboardingEvent_roomCodeId_fkey" FOREIGN KEY ("roomCodeId") REFERENCES "TenantRoomCode"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "RoomReservation" ADD CONSTRAINT "RoomReservation_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "TenantOnboardingEvent" ADD CONSTRAINT "TenantOnboardingEvent_tenantUserId_fkey" FOREIGN KEY ("tenantUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "RoomReservation" ADD CONSTRAINT "RoomReservation_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "RoomReservation" ADD CONSTRAINT "RoomReservation_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "RoomReservation" ADD CONSTRAINT "RoomReservation_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "RoomReservation" ADD CONSTRAINT "RoomReservation_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "RentalContract" ADD CONSTRAINT "RentalContract_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RentalContract" ADD CONSTRAINT "RentalContract_reservationId_fkey" FOREIGN KEY ("reservationId") REFERENCES "RoomReservation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "RentalContract" ADD CONSTRAINT "RentalContract_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "RentalContract" ADD CONSTRAINT "RentalContract_tenantUserId_fkey" FOREIGN KEY ("tenantUserId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "RentalContract" ADD CONSTRAINT "RentalContract_reservationId_fkey" FOREIGN KEY ("reservationId") REFERENCES "RoomReservation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ContractMonthlyCharge" ADD CONSTRAINT "ContractMonthlyCharge_contractId_fkey" FOREIGN KEY ("contractId") REFERENCES "RentalContract"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1412,19 +1527,19 @@ ALTER TABLE "StaffInvite" ADD CONSTRAINT "StaffInvite_condoId_fkey" FOREIGN KEY 
 ALTER TABLE "StaffInvite" ADD CONSTRAINT "StaffInvite_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "StaffMembership" ADD CONSTRAINT "StaffMembership_staffUserId_fkey" FOREIGN KEY ("staffUserId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "StaffMembership" ADD CONSTRAINT "StaffMembership_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "StaffMembership" ADD CONSTRAINT "StaffMembership_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "StaffMembership" ADD CONSTRAINT "StaffMembership_staffUserId_fkey" FOREIGN KEY ("staffUserId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "StaffPermissionTemplate" ADD CONSTRAINT "StaffPermissionTemplate_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "StaffPermissionTemplateItem" ADD CONSTRAINT "StaffPermissionTemplateItem_templateId_fkey" FOREIGN KEY ("templateId") REFERENCES "StaffPermissionTemplate"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "StaffPermissionTemplateItem" ADD CONSTRAINT "StaffPermissionTemplateItem_permissionId_fkey" FOREIGN KEY ("permissionId") REFERENCES "PermissionCatalog"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "StaffPermissionTemplateItem" ADD CONSTRAINT "StaffPermissionTemplateItem_permissionId_fkey" FOREIGN KEY ("permissionId") REFERENCES "PermissionCatalog"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "StaffPermissionTemplateItem" ADD CONSTRAINT "StaffPermissionTemplateItem_templateId_fkey" FOREIGN KEY ("templateId") REFERENCES "StaffPermissionTemplate"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "StaffPermissionAssignment" ADD CONSTRAINT "StaffPermissionAssignment_membershipId_fkey" FOREIGN KEY ("membershipId") REFERENCES "StaffMembership"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1454,22 +1569,22 @@ ALTER TABLE "AnnouncementRead" ADD CONSTRAINT "AnnouncementRead_tenantUserId_fke
 ALTER TABLE "ChatRoom" ADD CONSTRAINT "ChatRoom_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ChatRoom" ADD CONSTRAINT "ChatRoom_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "ChatRoom" ADD CONSTRAINT "ChatRoom_contractId_fkey" FOREIGN KEY ("contractId") REFERENCES "RentalContract"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ChatRoom" ADD CONSTRAINT "ChatRoom_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "ChatRoom" ADD CONSTRAINT "ChatRoom_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ChatRoomMember" ADD CONSTRAINT "ChatRoomMember_chatRoomId_fkey" FOREIGN KEY ("chatRoomId") REFERENCES "ChatRoom"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ChatRoomMember" ADD CONSTRAINT "ChatRoomMember_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ChatRoomMember" ADD CONSTRAINT "ChatRoomMember_staffMembershipId_fkey" FOREIGN KEY ("staffMembershipId") REFERENCES "StaffMembership"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ChatRoomMember" ADD CONSTRAINT "ChatRoomMember_staffMembershipId_fkey" FOREIGN KEY ("staffMembershipId") REFERENCES "StaffMembership"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "ChatRoomMember" ADD CONSTRAINT "ChatRoomMember_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ChatMessage" ADD CONSTRAINT "ChatMessage_chatRoomId_fkey" FOREIGN KEY ("chatRoomId") REFERENCES "ChatRoom"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1484,7 +1599,13 @@ ALTER TABLE "ChatMessageRead" ADD CONSTRAINT "ChatMessageRead_messageId_fkey" FO
 ALTER TABLE "ChatMessageRead" ADD CONSTRAINT "ChatMessageRead_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "RepairRequest" ADD CONSTRAINT "RepairRequest_assignedToMembershipId_fkey" FOREIGN KEY ("assignedToMembershipId") REFERENCES "StaffMembership"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "RepairRequest" ADD CONSTRAINT "RepairRequest_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RepairRequest" ADD CONSTRAINT "RepairRequest_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "RepairRequest" ADD CONSTRAINT "RepairRequest_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -1493,34 +1614,28 @@ ALTER TABLE "RepairRequest" ADD CONSTRAINT "RepairRequest_roomId_fkey" FOREIGN K
 ALTER TABLE "RepairRequest" ADD CONSTRAINT "RepairRequest_tenantUserId_fkey" FOREIGN KEY ("tenantUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "RepairRequest" ADD CONSTRAINT "RepairRequest_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "RepairRequest" ADD CONSTRAINT "RepairRequest_assignedToMembershipId_fkey" FOREIGN KEY ("assignedToMembershipId") REFERENCES "StaffMembership"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "RepairAttachment" ADD CONSTRAINT "RepairAttachment_repairId_fkey" FOREIGN KEY ("repairId") REFERENCES "RepairRequest"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "RepairAttachment" ADD CONSTRAINT "RepairAttachment_uploadedBy_fkey" FOREIGN KEY ("uploadedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "RepairUpdate" ADD CONSTRAINT "RepairUpdate_repairId_fkey" FOREIGN KEY ("repairId") REFERENCES "RepairRequest"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "RepairUpdate" ADD CONSTRAINT "RepairUpdate_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "RepairUpdate" ADD CONSTRAINT "RepairUpdate_repairId_fkey" FOREIGN KEY ("repairId") REFERENCES "RepairRequest"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "Parcel" ADD CONSTRAINT "Parcel_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Parcel" ADD CONSTRAINT "Parcel_receivedByMembershipId_fkey" FOREIGN KEY ("receivedByMembershipId") REFERENCES "StaffMembership"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Parcel" ADD CONSTRAINT "Parcel_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Parcel" ADD CONSTRAINT "Parcel_tenantUserId_fkey" FOREIGN KEY ("tenantUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Parcel" ADD CONSTRAINT "Parcel_receivedByMembershipId_fkey" FOREIGN KEY ("receivedByMembershipId") REFERENCES "StaffMembership"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ParcelAttachment" ADD CONSTRAINT "ParcelAttachment_parcelId_fkey" FOREIGN KEY ("parcelId") REFERENCES "Parcel"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1538,7 +1653,13 @@ ALTER TABLE "Facility" ADD CONSTRAINT "Facility_condoId_fkey" FOREIGN KEY ("cond
 ALTER TABLE "FacilityBookingSetting" ADD CONSTRAINT "FacilityBookingSetting_facilityId_fkey" FOREIGN KEY ("facilityId") REFERENCES "Facility"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "FacilityBooking" ADD CONSTRAINT "FacilityBooking_approvedBy_fkey" FOREIGN KEY ("approvedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "FacilityBooking" ADD CONSTRAINT "FacilityBooking_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "FacilityBooking" ADD CONSTRAINT "FacilityBooking_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "FacilityBooking" ADD CONSTRAINT "FacilityBooking_facilityId_fkey" FOREIGN KEY ("facilityId") REFERENCES "Facility"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1550,16 +1671,13 @@ ALTER TABLE "FacilityBooking" ADD CONSTRAINT "FacilityBooking_roomId_fkey" FOREI
 ALTER TABLE "FacilityBooking" ADD CONSTRAINT "FacilityBooking_tenantUserId_fkey" FOREIGN KEY ("tenantUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "FacilityBooking" ADD CONSTRAINT "FacilityBooking_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "FacilityBooking" ADD CONSTRAINT "FacilityBooking_approvedBy_fkey" FOREIGN KEY ("approvedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "FacilityBookingUpdate" ADD CONSTRAINT "FacilityBookingUpdate_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "FacilityBooking"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "FacilityBookingUpdate" ADD CONSTRAINT "FacilityBookingUpdate_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "MeterCycle" ADD CONSTRAINT "MeterCycle_closedBy_fkey" FOREIGN KEY ("closedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "MeterCycle" ADD CONSTRAINT "MeterCycle_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1568,13 +1686,7 @@ ALTER TABLE "MeterCycle" ADD CONSTRAINT "MeterCycle_condoId_fkey" FOREIGN KEY ("
 ALTER TABLE "MeterCycle" ADD CONSTRAINT "MeterCycle_openedBy_fkey" FOREIGN KEY ("openedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "MeterCycle" ADD CONSTRAINT "MeterCycle_closedBy_fkey" FOREIGN KEY ("closedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "MeterReading" ADD CONSTRAINT "MeterReading_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "MeterReading" ADD CONSTRAINT "MeterReading_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "MeterReading" ADD CONSTRAINT "MeterReading_cycleId_fkey" FOREIGN KEY ("cycleId") REFERENCES "MeterCycle"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1583,13 +1695,13 @@ ALTER TABLE "MeterReading" ADD CONSTRAINT "MeterReading_cycleId_fkey" FOREIGN KE
 ALTER TABLE "MeterReading" ADD CONSTRAINT "MeterReading_recordedBy_fkey" FOREIGN KEY ("recordedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "MeterReading" ADD CONSTRAINT "MeterReading_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "MeterAttachment" ADD CONSTRAINT "MeterAttachment_meterReadingId_fkey" FOREIGN KEY ("meterReadingId") REFERENCES "MeterReading"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_contractId_fkey" FOREIGN KEY ("contractId") REFERENCES "RentalContract"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -1598,7 +1710,7 @@ ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_contractId_fkey" FOREIGN KEY ("con
 ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "InvoiceItem" ADD CONSTRAINT "InvoiceItem_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "InvoiceItem" ADD CONSTRAINT "InvoiceItem_condoChargeId_fkey" FOREIGN KEY ("condoChargeId") REFERENCES "CondoCharge"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -1607,22 +1719,22 @@ ALTER TABLE "InvoiceItem" ADD CONSTRAINT "InvoiceItem_condoChargeId_fkey" FOREIG
 ALTER TABLE "InvoiceItem" ADD CONSTRAINT "InvoiceItem_extraChargeTemplateId_fkey" FOREIGN KEY ("extraChargeTemplateId") REFERENCES "ExtraChargeTemplate"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "InvoiceItem" ADD CONSTRAINT "InvoiceItem_meterReadingId_fkey" FOREIGN KEY ("meterReadingId") REFERENCES "MeterReading"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "InvoiceItem" ADD CONSTRAINT "InvoiceItem_facilityBookingId_fkey" FOREIGN KEY ("facilityBookingId") REFERENCES "FacilityBooking"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "InvoiceMeterLink" ADD CONSTRAINT "InvoiceMeterLink_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "InvoiceItem" ADD CONSTRAINT "InvoiceItem_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InvoiceItem" ADD CONSTRAINT "InvoiceItem_meterReadingId_fkey" FOREIGN KEY ("meterReadingId") REFERENCES "MeterReading"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "InvoiceMeterLink" ADD CONSTRAINT "InvoiceMeterLink_cycleId_fkey" FOREIGN KEY ("cycleId") REFERENCES "MeterCycle"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "PaymentNotice" ADD CONSTRAINT "PaymentNotice_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "InvoiceMeterLink" ADD CONSTRAINT "InvoiceMeterLink_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "PaymentNotice" ADD CONSTRAINT "PaymentNotice_tenantUserId_fkey" FOREIGN KEY ("tenantUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "PaymentNotice" ADD CONSTRAINT "PaymentNotice_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "PaymentNotice" ADD CONSTRAINT "PaymentNotice_paidToAccountId_fkey" FOREIGN KEY ("paidToAccountId") REFERENCES "CondoBankAccount"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -1631,22 +1743,25 @@ ALTER TABLE "PaymentNotice" ADD CONSTRAINT "PaymentNotice_paidToAccountId_fkey" 
 ALTER TABLE "PaymentNotice" ADD CONSTRAINT "PaymentNotice_reviewedBy_fkey" FOREIGN KEY ("reviewedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "PaymentNotice" ADD CONSTRAINT "PaymentNotice_tenantUserId_fkey" FOREIGN KEY ("tenantUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "PaymentAttachment" ADD CONSTRAINT "PaymentAttachment_paymentNoticeId_fkey" FOREIGN KEY ("paymentNoticeId") REFERENCES "PaymentNotice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "PaymentTransaction" ADD CONSTRAINT "PaymentTransaction_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "PaymentTransaction" ADD CONSTRAINT "PaymentTransaction_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "PaymentTransaction" ADD CONSTRAINT "PaymentTransaction_confirmedBy_fkey" FOREIGN KEY ("confirmedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "PaymentTransaction" ADD CONSTRAINT "PaymentTransaction_paymentNoticeId_fkey" FOREIGN KEY ("paymentNoticeId") REFERENCES "PaymentNotice"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "PaymentTransaction" ADD CONSTRAINT "PaymentTransaction_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "PaymentTransaction" ADD CONSTRAINT "PaymentTransaction_paidToAccountId_fkey" FOREIGN KEY ("paidToAccountId") REFERENCES "CondoBankAccount"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "PaymentTransaction" ADD CONSTRAINT "PaymentTransaction_confirmedBy_fkey" FOREIGN KEY ("confirmedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "PaymentTransaction" ADD CONSTRAINT "PaymentTransaction_paymentNoticeId_fkey" FOREIGN KEY ("paymentNoticeId") REFERENCES "PaymentNotice"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "PaymentUpdate" ADD CONSTRAINT "PaymentUpdate_paymentNoticeId_fkey" FOREIGN KEY ("paymentNoticeId") REFERENCES "PaymentNotice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1655,10 +1770,10 @@ ALTER TABLE "PaymentUpdate" ADD CONSTRAINT "PaymentUpdate_paymentNoticeId_fkey" 
 ALTER TABLE "PaymentUpdate" ADD CONSTRAINT "PaymentUpdate_updatedBy_fkey" FOREIGN KEY ("updatedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "TenantNotification" ADD CONSTRAINT "TenantNotification_tenantUserId_fkey" FOREIGN KEY ("tenantUserId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "TenantNotification" ADD CONSTRAINT "TenantNotification_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "TenantNotification" ADD CONSTRAINT "TenantNotification_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "TenantNotification" ADD CONSTRAINT "TenantNotification_tenantUserId_fkey" FOREIGN KEY ("tenantUserId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "DashboardDailySnapshot" ADD CONSTRAINT "DashboardDailySnapshot_condoId_fkey" FOREIGN KEY ("condoId") REFERENCES "Condo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
