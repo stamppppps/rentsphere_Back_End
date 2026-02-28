@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node src/index.js"
+    "dev": "node src/index.js",
+   "migrate:legacy:condo": "tsx prisma/migrate-legacy-condo.ts"
+
   },
   "dependencies": {
     "express": "^4.19.2",

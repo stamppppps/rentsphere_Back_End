@@ -7,31 +7,1301 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Role {
-  TENANT
-  OWNER
-  ADMIN
+model User {
+  id                            String                  @id @default(uuid()) @db.Uuid
+  email                         String?                 @unique
+  phone                         String?                 @unique
+  passwordHash                  String?
+  role                          Role                    @default(TENANT)
+  name                          String?
+  isActive                      Boolean                 @default(true)
+  verifyChannel                 VerifyChannel           @default(EMAIL)
+  emailVerifiedAt               DateTime?
+  phoneVerifiedAt               DateTime?
+  createdAt                     DateTime                @default(now())
+  updatedAt                     DateTime?               @updatedAt
+  announcementsCreated          Announcement[]          @relation("AnnouncementCreatedBy")
+  announcementReads             AnnouncementRead[]      @relation("AnnouncementReadByTenant")
+  auditLogsActed                AuditLog[]              @relation("AuditActor")
+  chatMessages                  ChatMessage[]
+  chatMessageReads              ChatMessageRead[]
+  chatRoomsCreated              ChatRoom[]              @relation("ChatRoomCreatedBy")
+  chatRoomMembers               ChatRoomMember[]
+  condosOwned                   Condo[]                 @relation("CondoOwner")
+  condoAssetsUploaded           CondoAsset[]            @relation("CondoAssetUploader")
+  facilityBookingsApproved      FacilityBooking[]       @relation("FacilityBookingApprovedBy")
+  facilityBookingsCreated       FacilityBooking[]       @relation("FacilityBookingCreatedBy")
+  tenantFacilityBookings        FacilityBooking[]       @relation("FacilityBookingTenant")
+  facilityBookingUpdatesCreated FacilityBookingUpdate[] @relation("FacilityBookingUpdateCreatedBy")
+  invoicesCreated               Invoice[]               @relation("InvoiceCreatedBy")
+  lineAccount                   LineAccount?
+  meterCyclesClosed             MeterCycle[]            @relation("MeterCycleClosedBy")
+  meterCyclesOpened             MeterCycle[]            @relation("MeterCycleOpenedBy")
+  meterReadingsRecorded         MeterReading[]          @relation("MeterReadingRecordedBy")
+  tenantParcels                 Parcel[]                @relation("ParcelTenant")
+  parcelAttachmentsUploaded     ParcelAttachment[]      @relation("ParcelAttachmentUploadedBy")
+  passwordResetRequests         PasswordResetRequest[]
+  paymentNoticesReviewed        PaymentNotice[]         @relation("PaymentReviewedBy")
+  tenantPaymentNotices          PaymentNotice[]         @relation("PaymentNoticeTenant")
+  paymentTxnsConfirmed          PaymentTransaction[]    @relation("PaymentConfirmedBy")
+  paymentUpdatesMade            PaymentUpdate[]         @relation("PaymentUpdateBy")
+  rentalContracts               RentalContract[]        @relation("ContractTenant")
+  repairAttachmentsUploaded     RepairAttachment[]      @relation("RepairAttachmentUploadedBy")
+  repairRequestsCreated         RepairRequest[]         @relation("RepairCreatedBy")
+  tenantRepairRequests          RepairRequest[]         @relation("RepairTenant")
+  repairUpdatesCreated          RepairUpdate[]          @relation("RepairUpdateCreatedBy")
+  reservationsCreated           RoomReservation[]       @relation("ReservationCreatedBy")
+  roomStatusChanges             RoomStatusHistory[]     @relation("RoomStatusChangedBy")
+  staffInvitesCreated           StaffInvite[]           @relation("StaffInviteCreatedBy")
+  staffMemberships              StaffMembership[]       @relation("UserStaffMembership")
+  tenantNotifications           TenantNotification[]    @relation("TenantNotificationUser")
+  onboardingEvents              TenantOnboardingEvent[] @relation("TenantOnboardingUser")
+  tenantProfile                 TenantProfile?
+  residencies                   TenantResidency[]       @relation("ResidencyTenant")
+  tenantCodesCreated            TenantRoomCode[]        @relation("TenantCodeCreatedBy")
+  tenantCodesUsed               TenantRoomCode[]        @relation("TenantCodeUsedBy")
+  verifyRequests                VerifyRequest[]
 }
 
-enum CondoType {
-  DORM
-  CONDO
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorUserId String?  @db.Uuid
+  action      String
+  entityType  String?
+  entityId    String?  @db.Uuid
+  ip          String?
+  userAgent   String?
+  meta        Json?
+  createdAt   DateTime @default(now())
+  actor       User?    @relation("AuditActor", fields: [actorUserId], references: [id])
+
+  @@index([actorUserId])
+}
+
+model VerifyRequest {
+  id            String        @id @default(uuid()) @db.Uuid
+  userId        String        @db.Uuid
+  channel       VerifyChannel
+  emailCodeHash String?
+  phoneOtpHash  String?
+  expiresAt     DateTime
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PasswordResetRequest {
+  id        String        @id @default(uuid()) @db.Uuid
+  userId    String        @db.Uuid
+  channel   VerifyChannel
+  codeHash  String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Condo {
+  id                       String                    @id @default(uuid()) @db.Uuid
+  ownerUserId              String                    @db.Uuid
+  description              String?
+  totalFloors              Int?
+  status                   CondoStatus               @default(ACTIVE)
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime?                 @updatedAt
+  addressEn                String?
+  addressTh                String
+  nameEn                   String?
+  nameTh                   String
+  phoneNumber              String?
+  taxId                    String?
+  announcements            Announcement[]
+  chatRooms                ChatRoom[]
+  owner                    User                      @relation("CondoOwner", fields: [ownerUserId], references: [id])
+  assets                   CondoAsset[]
+  bankAccounts             CondoBankAccount[]
+  billingSetting           CondoBillingSetting?
+  chargeSettings           CondoCharge[]
+  floors                   CondoFloor[]
+  onboarding               CondoOnboarding?
+  services                 CondoService[]
+  condoUtilitySettings     CondoUtilitySetting[]
+  dashboardSnapshots       DashboardDailySnapshot[]
+  extraChargeTemplates     ExtraChargeTemplate[]
+  facilities               Facility[]
+  facilityBookings         FacilityBooking[]
+  invoices                 Invoice[]
+  meterCycles              MeterCycle[]
+  meterReadings            MeterReading[]
+  parcels                  Parcel[]
+  paymentTxns              PaymentTransaction[]
+  contracts                RentalContract[]
+  repairRequests           RepairRequest[]
+  reportSnapshots          ReportMonthlySnapshot[]
+  rooms                    Room[]
+  reservations             RoomReservation[]
+  staffInvites             StaffInvite[]
+  staffMemberships         StaffMembership[]
+  staffPermissionTemplates StaffPermissionTemplate[]
+  tenantNotifications      TenantNotification[]
+  residencies              TenantResidency[]
+  tenantCodes              TenantRoomCode[]
+  utilityRates             UtilityRate[]
+  utilitySetting           UtilitySetting?
+
+  paymentInstruction CondoPaymentInstruction?
+
+  @@index([ownerUserId])
+}
+
+model CondoUtilitySetting {
+  id          String             @id @default(cuid())
+  condoId     String             @db.Uuid
+  utilityType UtilityType
+  billingType UtilityBillingType
+  rate        Decimal            @db.Decimal(12, 2)
+  createdBy   String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  condo       Condo              @relation(fields: [condoId], references: [id], onDelete: Cascade)
+
+  @@unique([condoId, utilityType])
+  @@index([condoId])
+}
+
+model CondoAsset {
+  id         String    @id @default(uuid()) @db.Uuid
+  condoId    String    @db.Uuid
+  assetType  AssetType
+  fileUrl    String
+  fileName   String?
+  mimeType   String?
+  sizeBytes  BigInt?
+  isPrimary  Boolean   @default(false)
+  uploadedBy String?   @db.Uuid
+  createdAt  DateTime  @default(now())
+  condo      Condo     @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  uploader   User?     @relation("CondoAssetUploader", fields: [uploadedBy], references: [id])
+
+  @@index([condoId])
+}
+
+model CondoService {
+  id           String   @id @default(cuid())
+  condoId      String   @db.Uuid
+  name         String
+  price        Decimal  @db.Decimal(12, 2)
+  isVariable   Boolean  @default(false)
+  variableType String   @default("NONE")
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  condo        Condo    @relation(fields: [condoId], references: [id], onDelete: Cascade)
+
+  @@unique([condoId, name])
+  @@index([condoId])
+}
+
+model CondoBankAccount {
+  id                  String               @id @default(uuid()) @db.Uuid
+  condoId             String               @db.Uuid
+  bankName            String
+  bankCode            String?
+  accountName         String
+  accountNo           String
+  isActive            Boolean              @default(true)
+  createdAt           DateTime             @default(now())
+  condo               Condo                @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  paymentNotices      PaymentNotice[]
+  paymentTransactions PaymentTransaction[]
+
+  @@index([condoId])
+}
+
+model CondoPaymentInstruction {
+  condoId String @id @db.Uuid
+  message String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  condo Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
+
+  @@map("CondoPaymentInstruction")
+}
+
+model CondoBillingSetting {
+  id         String    @id @default(uuid()) @db.Uuid
+  condoId    String    @unique @db.Uuid
+  dueDay     Int
+  acceptFine Boolean   @default(false)
+  finePerDay Decimal?  @db.Decimal(12, 2)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime? @updatedAt
+  condo      Condo     @relation(fields: [condoId], references: [id], onDelete: Cascade)
+}
+
+model CondoOnboarding {
+  id          String         @id @default(uuid()) @db.Uuid
+  condoId     String         @unique @db.Uuid
+  currentStep CondoSetupStep @default(STEP_0)
+  basicDone   Boolean        @default(false)
+  chargesDone Boolean        @default(false)
+  utilityDone Boolean        @default(false)
+  bankDone    Boolean        @default(false)
+  roomsDone   Boolean        @default(false)
+  staffDone   Boolean        @default(false)
+  confirmDone Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime?      @updatedAt
+  condo       Condo          @relation(fields: [condoId], references: [id], onDelete: Cascade)
+}
+
+model CondoFloor {
+  id        String    @id @default(uuid()) @db.Uuid
+  condoId   String    @db.Uuid
+  floorNo   Int
+  label     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime? @updatedAt
+  condo     Condo     @relation(fields: [condoId], references: [id], onDelete: Cascade)
+
+  @@unique([condoId, floorNo])
+  @@index([condoId])
+}
+
+model UtilitySetting {
+  id              String    @id @default(uuid()) @db.Uuid
+  condoId         String    @unique @db.Uuid
+  waterEnabled    Boolean   @default(true)
+  electricEnabled Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime? @updatedAt
+  condo           Condo     @relation(fields: [condoId], references: [id], onDelete: Cascade)
+}
+
+model UtilityRate {
+  id            String      @id @default(uuid()) @db.Uuid
+  condoId       String      @db.Uuid
+  utilityType   UtilityType
+  ratePerUnit   Decimal     @db.Decimal(12, 2)
+  effectiveFrom DateTime    @db.Date
+  effectiveTo   DateTime?   @db.Date
+  createdAt     DateTime    @default(now())
+  condo         Condo       @relation(fields: [condoId], references: [id], onDelete: Cascade)
+
+  @@index([condoId, utilityType])
+}
+
+model ChargeCatalog {
+  id           String        @id @default(uuid()) @db.Uuid
+  code         String        @unique
+  nameTh       String
+  description  String?
+  isActive     Boolean       @default(true)
+  condoCharges CondoCharge[]
+}
+
+model CondoCharge {
+  id           String        @id @default(uuid()) @db.Uuid
+  condoId      String        @db.Uuid
+  catalogId    String        @db.Uuid
+  amount       Decimal       @db.Decimal(12, 2)
+  billingCycle BillingCycle  @default(MONTHLY)
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  catalog      ChargeCatalog @relation(fields: [catalogId], references: [id])
+  condo        Condo         @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  invoiceItems InvoiceItem[]
+  roomCharges  RoomCharge[]
+
+  @@index([condoId])
+  @@index([catalogId])
+}
+
+model RoomCharge {
+  id             String      @id @default(uuid()) @db.Uuid
+  roomId         String      @db.Uuid
+  condoChargeId  String      @db.Uuid
+  isEnabled      Boolean     @default(true)
+  amountOverride Decimal?    @db.Decimal(12, 2)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime?   @updatedAt
+  condoCharge    CondoCharge @relation(fields: [condoChargeId], references: [id], onDelete: Cascade)
+  room           Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, condoChargeId])
+  @@index([roomId])
+  @@index([condoChargeId])
+}
+
+model ExtraChargeTemplate {
+  id              String                      @id @default(uuid()) @db.Uuid
+  condoId         String                      @db.Uuid
+  templateName    String
+  defaultAmount   Decimal                     @db.Decimal(12, 2)
+  billingCycle    BillingCycle                @default(MONTHLY)
+  isActive        Boolean                     @default(true)
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime?                   @updatedAt
+  condo           Condo                       @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  invoiceItems    InvoiceItem[]
+  roomAssignments RoomExtraChargeAssignment[]
+
+  @@index([condoId])
+}
+
+model RoomExtraChargeAssignment {
+  id             String              @id @default(uuid()) @db.Uuid
+  roomId         String              @db.Uuid
+  templateId     String              @db.Uuid
+  isEnabled      Boolean             @default(true)
+  amountOverride Decimal?            @db.Decimal(12, 2)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime?           @updatedAt
+  room           Room                @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  template       ExtraChargeTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, templateId])
+  @@index([roomId])
+  @@index([templateId])
+}
+
+model Room {
+  id                     String                      @id @default(uuid()) @db.Uuid
+  condoId                String                      @db.Uuid
+  roomNo                 String
+  floor                  Int
+  rentPrice              Decimal                     @db.Decimal(12, 2)
+  deposit                Decimal?                    @db.Decimal(12, 2)
+  size                   Decimal?                    @db.Decimal(12, 2)
+  isActive               Boolean                     @default(true)
+  occupancyStatus        OccupancyStatus             @default(VACANT)
+  roomStatus             RoomStatus                  @default(NORMAL)
+  createdAt              DateTime                    @default(now())
+  updatedAt              DateTime?                   @updatedAt
+  chatRooms              ChatRoom[]
+  facilityBookings       FacilityBooking[]
+  invoices               Invoice[]
+  meterReadings          MeterReading[]
+  parcels                Parcel[]
+  contracts              RentalContract[]
+  repairRequests         RepairRequest[]
+  condo                  Condo                       @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  roomCharges            RoomCharge[]
+  extraChargeAssignments RoomExtraChargeAssignment[]
+  meter                  RoomMeter?
+  reservations           RoomReservation[]
+  statusHistories        RoomStatusHistory[]
+  residencies            TenantResidency[]
+  tenantCodes            TenantRoomCode[]
+
+  @@unique([condoId, roomNo])
+  @@index([condoId])
+}
+
+model RoomStatusHistory {
+  id                 String           @id @default(uuid()) @db.Uuid
+  roomId             String           @db.Uuid
+  oldOccupancyStatus OccupancyStatus?
+  newOccupancyStatus OccupancyStatus?
+  oldRoomStatus      RoomStatus?
+  newRoomStatus      RoomStatus?
+  changedBy          String?          @db.Uuid
+  changedAt          DateTime         @default(now())
+  note               String?
+  changer            User?            @relation("RoomStatusChangedBy", fields: [changedBy], references: [id])
+  room               Room             @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+}
+
+model RoomMeter {
+  id              String    @id @default(uuid()) @db.Uuid
+  roomId          String    @unique @db.Uuid
+  waterMeterNo    String?
+  electricMeterNo String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime? @updatedAt
+  room            Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+}
+
+model TenantProfile {
+  id                String                   @id @default(uuid()) @db.Uuid
+  userId            String                   @unique @db.Uuid
+  fullName          String
+  phone             String?
+  idType            String
+  idNumber          String
+  address           String?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime?                @updatedAt
+  emergencyContacts TenantEmergencyContact[]
+  user              User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model TenantEmergencyContact {
+  id              String        @id @default(uuid()) @db.Uuid
+  tenantProfileId String        @db.Uuid
+  contactName     String
+  relationship    String?
+  phone           String
+  note            String?
+  createdAt       DateTime      @default(now())
+  tenantProfile   TenantProfile @relation(fields: [tenantProfileId], references: [id], onDelete: Cascade)
+
+  @@index([tenantProfileId])
+}
+
+model LineAccount {
+  id               String                  @id @default(uuid()) @db.Uuid
+  userId           String                  @unique @db.Uuid
+  lineUserId       String                  @unique
+  displayName      String?
+  pictureUrl       String?
+  linkedAt         DateTime                @default(now())
+  isActive         Boolean                 @default(true)
+  user             User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  onboardingEvents TenantOnboardingEvent[]
+}
+
+model TenantRoomCode {
+  id               String                  @id @default(uuid()) @db.Uuid
+  condoId          String                  @db.Uuid
+  roomId           String                  @db.Uuid
+  contractId       String?                 @db.Uuid
+  code             String                  @unique
+  status           CodeStatus              @default(ACTIVE)
+  expiresAt        DateTime?
+  usedByUserId     String?                 @db.Uuid
+  usedAt           DateTime?
+  createdBy        String?                 @db.Uuid
+  createdAt        DateTime                @default(now())
+  onboardingEvents TenantOnboardingEvent[] @relation("OnboardingByRoomCode")
+  condo            Condo                   @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  contract         RentalContract?         @relation(fields: [contractId], references: [id])
+  creator          User?                   @relation("TenantCodeCreatedBy", fields: [createdBy], references: [id])
+  room             Room                    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  usedBy           User?                   @relation("TenantCodeUsedBy", fields: [usedByUserId], references: [id])
+
+  @@index([condoId])
+  @@index([roomId])
+  @@index([contractId])
+}
+
+model TenantResidency {
+  id           String          @id @default(uuid()) @db.Uuid
+  tenantUserId String          @db.Uuid
+  condoId      String          @db.Uuid
+  roomId       String          @db.Uuid
+  contractId   String?         @db.Uuid
+  status       ResidencyStatus @default(ACTIVE)
+  startDate    DateTime        @db.Date
+  endDate      DateTime?       @db.Date
+  createdAt    DateTime        @default(now())
+  condo        Condo           @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  contract     RentalContract? @relation(fields: [contractId], references: [id])
+  room         Room            @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  tenant       User            @relation("ResidencyTenant", fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@index([tenantUserId])
+  @@index([condoId])
+  @@index([roomId])
+  @@index([contractId])
+}
+
+model TenantOnboardingEvent {
+  id            String              @id @default(uuid()) @db.Uuid
+  tenantUserId  String?             @db.Uuid
+  lineAccountId String?             @db.Uuid
+  roomCodeId    String?             @db.Uuid
+  channel       OnboardingChannel   @default(LINE)
+  eventType     OnboardingEventType
+  message       String?
+  createdAt     DateTime            @default(now())
+  lineAccount   LineAccount?        @relation(fields: [lineAccountId], references: [id])
+  roomCode      TenantRoomCode?     @relation("OnboardingByRoomCode", fields: [roomCodeId], references: [id])
+  tenant        User?               @relation("TenantOnboardingUser", fields: [tenantUserId], references: [id])
+
+  @@index([tenantUserId])
+  @@index([lineAccountId])
+  @@index([roomCodeId])
+}
+
+model RoomReservation {
+  id            String            @id @default(uuid()) @db.Uuid
+  condoId       String            @db.Uuid
+  roomId        String            @db.Uuid
+  reservationNo String            @unique
+  reservedAt    DateTime          @default(now())
+  moveInDate    DateTime          @db.Date
+  monthlyRent   Decimal           @db.Decimal(12, 2)
+  bookingFee    Decimal           @default(0) @db.Decimal(12, 2)
+  status        ReservationStatus @default(PENDING)
+  createdBy     String?           @db.Uuid
+  note          String?
+  contract      RentalContract?
+  condo         Condo             @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  creator       User?             @relation("ReservationCreatedBy", fields: [createdBy], references: [id])
+  room          Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([condoId])
+  @@index([roomId])
+}
+
+model RentalContract {
+  id                String                  @id @default(uuid()) @db.Uuid
+  condoId           String                  @db.Uuid
+  roomId            String                  @db.Uuid
+  tenantUserId      String                  @db.Uuid
+  reservationId     String?                 @unique @db.Uuid
+  moveInDate        DateTime                @db.Date
+  moveOutDate       DateTime?               @db.Date
+  monthlyRent       Decimal                 @db.Decimal(12, 2)
+  securityDeposit   Decimal                 @db.Decimal(12, 2)
+  depositPaidBy     String
+  bookingFeeApplied Decimal?                @default(0) @db.Decimal(12, 2)
+  status            ContractStatus          @default(ACTIVE)
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime?               @updatedAt
+  chatRooms         ChatRoom[]
+  monthlyCharges    ContractMonthlyCharge[]
+  invoices          Invoice[]
+  condo             Condo                   @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  reservation       RoomReservation?        @relation(fields: [reservationId], references: [id])
+  room              Room                    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  tenant            User                    @relation("ContractTenant", fields: [tenantUserId], references: [id], onDelete: Cascade)
+  residencies       TenantResidency[]
+  tenantRoomCodes   TenantRoomCode[]
+
+  @@index([condoId])
+  @@index([roomId])
+  @@index([tenantUserId])
+  @@index([reservationId])
+}
+
+model ContractMonthlyCharge {
+  id         String         @id @default(uuid()) @db.Uuid
+  contractId String         @db.Uuid
+  itemName   String
+  amount     Decimal        @db.Decimal(12, 2)
+  source     String?
+  createdAt  DateTime       @default(now())
+  contract   RentalContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId])
+}
+
+model StaffInvite {
+  id            String    @id @default(uuid()) @db.Uuid
+  condoId       String    @db.Uuid
+  email         String
+  token         String    @unique
+  staffPosition String?
+  status        String    @default("PENDING")
+  expiresAt     DateTime?
+  createdBy     String?   @db.Uuid
+  createdAt     DateTime  @default(now())
+  condo         Condo     @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  creator       User?     @relation("StaffInviteCreatedBy", fields: [createdBy], references: [id])
+
+  @@index([condoId])
+}
+
+model StaffMembership {
+  id                    String                      @id @default(uuid()) @db.Uuid
+  staffUserId           String                      @db.Uuid
+  condoId               String                      @db.Uuid
+  staffPosition         String?
+  isActive              Boolean                     @default(true)
+  createdAt             DateTime                    @default(now())
+  updatedAt             DateTime?                   @updatedAt
+  chatRoomMembers       ChatRoomMember[]
+  parcelsReceived       Parcel[]
+  repairAssigned        RepairRequest[]
+  condo                 Condo                       @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  staff                 User                        @relation("UserStaffMembership", fields: [staffUserId], references: [id], onDelete: Cascade)
+  permissionAssignments StaffPermissionAssignment[]
+  permissionOverrides   StaffPermissionOverride[]
+
+  @@unique([staffUserId, condoId])
+  @@index([condoId])
+}
+
+model PermissionCatalog {
+  id            String                        @id @default(uuid()) @db.Uuid
+  code          String                        @unique
+  nameTh        String
+  module        PermissionModule
+  isActive      Boolean                       @default(true)
+  overrides     StaffPermissionOverride[]
+  templateItems StaffPermissionTemplateItem[]
+}
+
+model StaffPermissionTemplate {
+  id           String                        @id @default(uuid()) @db.Uuid
+  condoId      String                        @db.Uuid
+  templateName String
+  isActive     Boolean                       @default(true)
+  createdAt    DateTime                      @default(now())
+  assignments  StaffPermissionAssignment[]
+  condo        Condo                         @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  items        StaffPermissionTemplateItem[]
+
+  @@index([condoId])
+}
+
+model StaffPermissionTemplateItem {
+  id           String                  @id @default(uuid()) @db.Uuid
+  templateId   String                  @db.Uuid
+  permissionId String                  @db.Uuid
+  allowed      Boolean                 @default(true)
+  permission   PermissionCatalog       @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  template     StaffPermissionTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, permissionId])
+}
+
+model StaffPermissionAssignment {
+  id           String                   @id @default(uuid()) @db.Uuid
+  membershipId String                   @db.Uuid
+  templateId   String?                  @db.Uuid
+  createdAt    DateTime                 @default(now())
+  membership   StaffMembership          @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  template     StaffPermissionTemplate? @relation(fields: [templateId], references: [id])
+
+  @@index([membershipId])
+  @@index([templateId])
+}
+
+model StaffPermissionOverride {
+  id           String            @id @default(uuid()) @db.Uuid
+  membershipId String            @db.Uuid
+  permissionId String            @db.Uuid
+  allowed      Boolean
+  createdAt    DateTime          @default(now())
+  membership   StaffMembership   @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  permission   PermissionCatalog @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([membershipId, permissionId])
+}
+
+model Announcement {
+  id            String             @id @default(uuid()) @db.Uuid
+  condoId       String             @db.Uuid
+  title         String
+  content       String
+  coverImageUrl String?
+  status        AnnouncementStatus @default(PUBLISHED)
+  pinned        Boolean            @default(false)
+  publishedAt   DateTime?
+  createdBy     String?            @db.Uuid
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime?          @updatedAt
+  condo         Condo              @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  creator       User?              @relation("AnnouncementCreatedBy", fields: [createdBy], references: [id])
+  reads         AnnouncementRead[]
+
+  @@index([condoId])
+}
+
+model AnnouncementRead {
+  id             String       @id @default(uuid()) @db.Uuid
+  announcementId String       @db.Uuid
+  tenantUserId   String       @db.Uuid
+  readAt         DateTime     @default(now())
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  tenant         User         @relation("AnnouncementReadByTenant", fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@unique([announcementId, tenantUserId])
+  @@index([tenantUserId])
+}
+
+model ChatRoom {
+  id         String           @id @default(uuid()) @db.Uuid
+  condoId    String           @db.Uuid
+  roomId     String?          @db.Uuid
+  contractId String?          @db.Uuid
+  createdBy  String?          @db.Uuid
+  createdAt  DateTime         @default(now())
+  messages   ChatMessage[]
+  condo      Condo            @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  contract   RentalContract?  @relation(fields: [contractId], references: [id])
+  creator    User?            @relation("ChatRoomCreatedBy", fields: [createdBy], references: [id])
+  room       Room?            @relation(fields: [roomId], references: [id])
+  members    ChatRoomMember[]
+
+  @@index([condoId])
+}
+
+model ChatRoomMember {
+  id                String           @id @default(uuid()) @db.Uuid
+  chatRoomId        String           @db.Uuid
+  userId            String           @db.Uuid
+  staffMembershipId String?          @db.Uuid
+  joinedAt          DateTime         @default(now())
+  isActive          Boolean          @default(true)
+  chatRoom          ChatRoom         @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  staffMembership   StaffMembership? @relation(fields: [staffMembershipId], references: [id])
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatRoomId, userId])
+}
+
+model ChatMessage {
+  id           String            @id @default(uuid()) @db.Uuid
+  chatRoomId   String            @db.Uuid
+  senderUserId String            @db.Uuid
+  messageType  ChatMessageType   @default(TEXT)
+  messageText  String?
+  fileUrl      String?
+  createdAt    DateTime          @default(now())
+  chatRoom     ChatRoom          @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  sender       User              @relation(fields: [senderUserId], references: [id], onDelete: Cascade)
+  reads        ChatMessageRead[]
+
+  @@index([chatRoomId])
+}
+
+model ChatMessageRead {
+  id        String      @id @default(uuid()) @db.Uuid
+  messageId String      @db.Uuid
+  userId    String      @db.Uuid
+  readAt    DateTime    @default(now())
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+}
+
+model RepairRequest {
+  id                     String             @id @default(uuid()) @db.Uuid
+  condoId                String             @db.Uuid
+  roomId                 String?            @db.Uuid
+  tenantUserId           String?            @db.Uuid
+  createdBy              String?            @db.Uuid
+  title                  String
+  description            String?
+  priority               RepairPriority     @default(NORMAL)
+  status                 RepairStatus       @default(OPEN)
+  assignedToMembershipId String?            @db.Uuid
+  scheduledAt            DateTime?
+  completedAt            DateTime?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime?          @updatedAt
+  attachments            RepairAttachment[]
+  assignedTo             StaffMembership?   @relation(fields: [assignedToMembershipId], references: [id])
+  condo                  Condo              @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  creator                User?              @relation("RepairCreatedBy", fields: [createdBy], references: [id])
+  room                   Room?              @relation(fields: [roomId], references: [id])
+  tenant                 User?              @relation("RepairTenant", fields: [tenantUserId], references: [id])
+  updates                RepairUpdate[]
+
+  @@index([condoId])
+}
+
+model RepairAttachment {
+  id         String         @id @default(uuid()) @db.Uuid
+  repairId   String         @db.Uuid
+  fileUrl    String
+  fileType   AttachmentType @default(IMAGE)
+  uploadedBy String?        @db.Uuid
+  createdAt  DateTime       @default(now())
+  repair     RepairRequest  @relation(fields: [repairId], references: [id], onDelete: Cascade)
+  uploader   User?          @relation("RepairAttachmentUploadedBy", fields: [uploadedBy], references: [id])
+
+  @@index([repairId])
+}
+
+model RepairUpdate {
+  id         String           @id @default(uuid()) @db.Uuid
+  repairId   String           @db.Uuid
+  updateType RepairUpdateType
+  message    String?
+  oldStatus  RepairStatus?
+  newStatus  RepairStatus?
+  createdBy  String?          @db.Uuid
+  createdAt  DateTime         @default(now())
+  creator    User?            @relation("RepairUpdateCreatedBy", fields: [createdBy], references: [id])
+  repair     RepairRequest    @relation(fields: [repairId], references: [id], onDelete: Cascade)
+
+  @@index([repairId])
+}
+
+model Parcel {
+  id                     String               @id @default(uuid()) @db.Uuid
+  condoId                String               @db.Uuid
+  roomId                 String?              @db.Uuid
+  tenantUserId           String?              @db.Uuid
+  trackingNo             String?
+  carrier                String?
+  senderName             String?
+  receivedAt             DateTime             @default(now())
+  receivedByMembershipId String?              @db.Uuid
+  status                 ParcelStatus         @default(RECEIVED)
+  pickedUpAt             DateTime?
+  pickedUpBy             String?
+  pickupNote             String?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime?            @updatedAt
+  condo                  Condo                @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  receivedBy             StaffMembership?     @relation(fields: [receivedByMembershipId], references: [id])
+  room                   Room?                @relation(fields: [roomId], references: [id])
+  tenant                 User?                @relation("ParcelTenant", fields: [tenantUserId], references: [id])
+  attachments            ParcelAttachment[]
+  notifications          ParcelNotification[]
+
+  @@index([condoId])
+}
+
+model ParcelAttachment {
+  id         String   @id @default(uuid()) @db.Uuid
+  parcelId   String   @db.Uuid
+  fileUrl    String
+  uploadedBy String?  @db.Uuid
+  createdAt  DateTime @default(now())
+  parcel     Parcel   @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  uploader   User?    @relation("ParcelAttachmentUploadedBy", fields: [uploadedBy], references: [id])
+
+  @@index([parcelId])
+}
+
+model ParcelNotification {
+  id           String        @id @default(uuid()) @db.Uuid
+  parcelId     String        @db.Uuid
+  channel      NotifyChannel @default(LINE)
+  sentTo       String?
+  sentAt       DateTime      @default(now())
+  status       String        @default("SENT")
+  errorMessage String?
+  parcel       Parcel        @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+
+  @@index([parcelId])
+}
+
+model Facility {
+  id             String                  @id @default(uuid()) @db.Uuid
+  condoId        String                  @db.Uuid
+  facilityName   String
+  description    String?
+  coverImageUrl  String?
+  isActive       Boolean                 @default(true)
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime?               @updatedAt
+  condo          Condo                   @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  bookings       FacilityBooking[]
+  bookingSetting FacilityBookingSetting?
+
+  @@index([condoId])
+}
+
+model FacilityBookingSetting {
+  id                String    @id @default(uuid()) @db.Uuid
+  facilityId        String    @unique @db.Uuid
+  openTime          DateTime? @db.Time(6)
+  closeTime         DateTime? @db.Time(6)
+  slotMinutes       Int       @default(60)
+  maxPeople         Int?
+  maxBookingsPerDay Int?
+  requiresApproval  Boolean   @default(false)
+  feePerSlot        Decimal   @default(0) @db.Decimal(12, 2)
+  deposit           Decimal   @default(0) @db.Decimal(12, 2)
+  cancellationHours Int       @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime? @updatedAt
+  facility          Facility  @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+}
+
+model FacilityBooking {
+  id           String                  @id @default(uuid()) @db.Uuid
+  condoId      String                  @db.Uuid
+  facilityId   String                  @db.Uuid
+  roomId       String?                 @db.Uuid
+  tenantUserId String?                 @db.Uuid
+  createdBy    String?                 @db.Uuid
+  bookingDate  DateTime                @db.Date
+  startTime    DateTime                @db.Time(6)
+  endTime      DateTime                @db.Time(6)
+  peopleCount  Int?
+  note         String?
+  status       FacilityBookingStatus   @default(PENDING)
+  approvedBy   String?                 @db.Uuid
+  approvedAt   DateTime?
+  rejectReason String?
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime?               @updatedAt
+  approver     User?                   @relation("FacilityBookingApprovedBy", fields: [approvedBy], references: [id])
+  condo        Condo                   @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  creator      User?                   @relation("FacilityBookingCreatedBy", fields: [createdBy], references: [id])
+  facility     Facility                @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  room         Room?                   @relation(fields: [roomId], references: [id])
+  tenant       User?                   @relation("FacilityBookingTenant", fields: [tenantUserId], references: [id])
+  updates      FacilityBookingUpdate[]
+  invoiceItems InvoiceItem[]
+
+  @@index([condoId])
+  @@index([facilityId])
+}
+
+model FacilityBookingUpdate {
+  id         String                    @id @default(uuid()) @db.Uuid
+  bookingId  String                    @db.Uuid
+  updateType FacilityBookingUpdateType
+  oldStatus  FacilityBookingStatus?
+  newStatus  FacilityBookingStatus?
+  message    String?
+  createdBy  String?                   @db.Uuid
+  createdAt  DateTime                  @default(now())
+  booking    FacilityBooking           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  creator    User?                     @relation("FacilityBookingUpdateCreatedBy", fields: [createdBy], references: [id])
+
+  @@index([bookingId])
+}
+
+model MeterCycle {
+  id           String             @id @default(uuid()) @db.Uuid
+  condoId      String             @db.Uuid
+  cycleMonth   DateTime           @db.Date
+  status       MeterCycleStatus   @default(OPEN)
+  openedAt     DateTime           @default(now())
+  openedBy     String?            @db.Uuid
+  closedAt     DateTime?
+  closedBy     String?            @db.Uuid
+  invoiceLinks InvoiceMeterLink[]
+  closer       User?              @relation("MeterCycleClosedBy", fields: [closedBy], references: [id])
+  condo        Condo              @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  opener       User?              @relation("MeterCycleOpenedBy", fields: [openedBy], references: [id])
+  readings     MeterReading[]
+
+  @@unique([condoId, cycleMonth])
+  @@index([condoId])
+}
+
+model MeterReading {
+  id            String             @id @default(uuid()) @db.Uuid
+  condoId       String             @db.Uuid
+  roomId        String             @db.Uuid
+  cycleId       String             @db.Uuid
+  prevWater     Decimal?           @db.Decimal(12, 2)
+  currWater     Decimal?           @db.Decimal(12, 2)
+  prevElectric  Decimal?           @db.Decimal(12, 2)
+  currElectric  Decimal?           @db.Decimal(12, 2)
+  waterUnits    Decimal?           @db.Decimal(12, 2)
+  electricUnits Decimal?           @db.Decimal(12, 2)
+  status        MeterReadingStatus @default(PENDING)
+  recordedAt    DateTime?
+  recordedBy    String?            @db.Uuid
+  note          String?
+  createdAt     DateTime           @default(now())
+  invoiceItems  InvoiceItem[]
+  attachments   MeterAttachment[]
+  condo         Condo              @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  cycle         MeterCycle         @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  recorder      User?              @relation("MeterReadingRecordedBy", fields: [recordedBy], references: [id])
+  room          Room               @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, cycleId])
+  @@index([condoId])
+}
+
+model MeterAttachment {
+  id             String       @id @default(uuid()) @db.Uuid
+  meterReadingId String       @db.Uuid
+  fileUrl        String
+  createdAt      DateTime     @default(now())
+  meterReading   MeterReading @relation(fields: [meterReadingId], references: [id], onDelete: Cascade)
+
+  @@index([meterReadingId])
+}
+
+model Invoice {
+  id             String               @id @default(uuid()) @db.Uuid
+  condoId        String               @db.Uuid
+  roomId         String               @db.Uuid
+  contractId     String?              @db.Uuid
+  invoiceNo      String               @unique
+  billingMonth   DateTime             @db.Date
+  status         InvoiceStatus        @default(DRAFT)
+  issuedAt       DateTime?
+  dueDate        DateTime?            @db.Date
+  subtotal       Decimal              @default(0) @db.Decimal(12, 2)
+  discountTotal  Decimal              @default(0) @db.Decimal(12, 2)
+  penaltyTotal   Decimal              @default(0) @db.Decimal(12, 2)
+  totalAmount    Decimal              @default(0) @db.Decimal(12, 2)
+  note           String?
+  createdBy      String?              @db.Uuid
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime?            @updatedAt
+  condo          Condo                @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  contract       RentalContract?      @relation(fields: [contractId], references: [id])
+  creator        User?                @relation("InvoiceCreatedBy", fields: [createdBy], references: [id])
+  room           Room                 @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  items          InvoiceItem[]
+  meterLinks     InvoiceMeterLink[]
+  paymentNotices PaymentNotice[]
+  paymentTxns    PaymentTransaction[]
+
+  @@unique([roomId, billingMonth])
+  @@index([condoId])
+}
+
+model InvoiceItem {
+  id                    String               @id @default(uuid()) @db.Uuid
+  invoiceId             String               @db.Uuid
+  itemType              InvoiceItemType
+  itemName              String
+  amount                Decimal              @db.Decimal(12, 2)
+  condoChargeId         String?              @db.Uuid
+  extraChargeTemplateId String?              @db.Uuid
+  meterReadingId        String?              @db.Uuid
+  facilityBookingId     String?              @db.Uuid
+  createdAt             DateTime             @default(now())
+  condoCharge           CondoCharge?         @relation(fields: [condoChargeId], references: [id])
+  extraTemplate         ExtraChargeTemplate? @relation(fields: [extraChargeTemplateId], references: [id])
+  facilityBooking       FacilityBooking?     @relation(fields: [facilityBookingId], references: [id])
+  invoice               Invoice              @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  meterReading          MeterReading?        @relation(fields: [meterReadingId], references: [id])
+
+  @@index([invoiceId])
+}
+
+model InvoiceMeterLink {
+  id        String     @id @default(uuid()) @db.Uuid
+  invoiceId String     @db.Uuid
+  cycleId   String     @db.Uuid
+  cycle     MeterCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  invoice   Invoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@unique([invoiceId, cycleId])
+}
+
+model PaymentNotice {
+  id              String               @id @default(uuid()) @db.Uuid
+  invoiceId       String               @db.Uuid
+  tenantUserId    String?              @db.Uuid
+  paidAmount      Decimal              @db.Decimal(12, 2)
+  paidAt          DateTime?
+  method          PaymentMethod
+  bankReference   String?
+  paidToAccountId String?              @db.Uuid
+  status          PaymentNoticeStatus  @default(PENDING)
+  reviewedBy      String?              @db.Uuid
+  reviewedAt      DateTime?
+  rejectReason    String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime?            @updatedAt
+  attachments     PaymentAttachment[]
+  invoice         Invoice              @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  paidToAccount   CondoBankAccount?    @relation(fields: [paidToAccountId], references: [id])
+  reviewer        User?                @relation("PaymentReviewedBy", fields: [reviewedBy], references: [id])
+  tenant          User?                @relation("PaymentNoticeTenant", fields: [tenantUserId], references: [id])
+  transactions    PaymentTransaction[]
+  updates         PaymentUpdate[]
+
+  @@index([invoiceId])
+}
+
+model PaymentAttachment {
+  id              String        @id @default(uuid()) @db.Uuid
+  paymentNoticeId String        @db.Uuid
+  fileUrl         String
+  createdAt       DateTime      @default(now())
+  notice          PaymentNotice @relation(fields: [paymentNoticeId], references: [id], onDelete: Cascade)
+
+  @@index([paymentNoticeId])
+}
+
+model PaymentTransaction {
+  id              String            @id @default(uuid()) @db.Uuid
+  condoId         String            @db.Uuid
+  invoiceId       String            @db.Uuid
+  paymentNoticeId String?           @db.Uuid
+  amount          Decimal           @db.Decimal(12, 2)
+  method          PaymentMethod
+  paidAt          DateTime?
+  paidToAccountId String?           @db.Uuid
+  status          PaymentTxnStatus  @default(CONFIRMED)
+  confirmedBy     String?           @db.Uuid
+  confirmedAt     DateTime?
+  createdAt       DateTime          @default(now())
+  condo           Condo             @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  confirmer       User?             @relation("PaymentConfirmedBy", fields: [confirmedBy], references: [id])
+  invoice         Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  paidToAccount   CondoBankAccount? @relation(fields: [paidToAccountId], references: [id])
+  notice          PaymentNotice?    @relation(fields: [paymentNoticeId], references: [id])
+
+  @@index([condoId])
+  @@index([invoiceId])
+}
+
+model PaymentUpdate {
+  id              String               @id @default(uuid()) @db.Uuid
+  paymentNoticeId String               @db.Uuid
+  oldStatus       PaymentNoticeStatus?
+  newStatus       PaymentNoticeStatus?
+  message         String?
+  updatedBy       String?              @db.Uuid
+  createdAt       DateTime             @default(now())
+  notice          PaymentNotice        @relation(fields: [paymentNoticeId], references: [id], onDelete: Cascade)
+  updater         User?                @relation("PaymentUpdateBy", fields: [updatedBy], references: [id])
+
+  @@index([paymentNoticeId])
+}
+
+model TenantNotification {
+  id           String                 @id @default(uuid()) @db.Uuid
+  tenantUserId String                 @db.Uuid
+  condoId      String?                @db.Uuid
+  type         TenantNotificationType
+  title        String
+  message      String?
+  refType      String?
+  refId        String?                @db.Uuid
+  isRead       Boolean                @default(false)
+  createdAt    DateTime               @default(now())
+  condo        Condo?                 @relation(fields: [condoId], references: [id])
+  tenant       User                   @relation("TenantNotificationUser", fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@index([tenantUserId])
+}
+
+model DashboardDailySnapshot {
+  id            String   @id @default(uuid()) @db.Uuid
+  condoId       String   @db.Uuid
+  snapshotDate  DateTime @db.Date
+  totalRooms    Int?
+  vacantRooms   Int?
+  occupiedRooms Int?
+  totalRevenue  Decimal? @db.Decimal(12, 2)
+  totalRepairs  Int?
+  totalParcels  Int?
+  createdAt     DateTime @default(now())
+  condo         Condo    @relation(fields: [condoId], references: [id], onDelete: Cascade)
+
+  @@unique([condoId, snapshotDate])
+}
+
+model ReportMonthlySnapshot {
+  id               String   @id @default(uuid()) @db.Uuid
+  condoId          String   @db.Uuid
+  month            DateTime @db.Date
+  totalIssued      Decimal  @default(0) @db.Decimal(12, 2)
+  totalPaid        Decimal  @default(0) @db.Decimal(12, 2)
+  totalOutstanding Decimal  @default(0) @db.Decimal(12, 2)
+  paidCount        Int      @default(0)
+  unpaidCount      Int      @default(0)
+  createdAt        DateTime @default(now())
+  condo            Condo    @relation(fields: [condoId], references: [id], onDelete: Cascade)
+
+  @@unique([condoId, month])
+}
+
+enum Role {
+  ADMIN
+  OWNER
+  STAFF
+  TENANT
+}
+
+enum VerifyChannel {
+  EMAIL
+  PHONE
+}
+
+enum CondoStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum AssetType {
+  LOGO
+  COVER
+  GALLERY
+  DOCUMENT
+}
+
+enum UtilityType {
+  WATER
+  ELECTRIC
+}
+
+enum BillingCycle {
+  MONTHLY
+  ONE_TIME
+}
+
+enum OccupancyStatus {
+  VACANT
+  OCCUPIED
+  RESERVED
 }
 
 enum RoomStatus {
-  AVAILABLE
-  OCCUPIED
+  NORMAL
   MAINTENANCE
+  BLOCKED
 }
 
-enum TenancyStatus {
+enum CodeStatus {
+  ACTIVE
+  USED
+  EXPIRED
+  DISABLED
+}
+
+enum ResidencyStatus {
   ACTIVE
   ENDED
 }
 
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  EXPIRED
+  CONVERTED_TO_CONTRACT
+}
+
+enum ContractStatus {
+  ACTIVE
+  ENDED
+  CANCELLED
+}
+
+enum PermissionModule {
+  DASHBOARD
+  ROOMS
+  BILLING
+  PAYMENT
+  REPAIR
+  PARCEL
+  FACILITY
+  ANNOUNCE
+  CHAT
+  TENANT
+  STAFF
+}
+
+enum AnnouncementStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ChatMessageType {
+  TEXT
+  IMAGE
+  FILE
+  SYSTEM
+}
+
 enum RepairPriority {
   LOW
-  MEDIUM
+  NORMAL
   HIGH
   URGENT
 }
@@ -39,387 +1309,136 @@ enum RepairPriority {
 enum RepairStatus {
   OPEN
   IN_PROGRESS
+  WAITING_PARTS
   DONE
-  CANCELED
+  CANCELLED
 }
 
-enum BookingStatus {
-  PENDING
-  CONFIRMED
-  CANCELED
-  COMPLETED
+enum AttachmentType {
+  IMAGE
+  VIDEO
+  OTHER
 }
 
 enum ParcelStatus {
-  INCOMING
-  ARRIVED
+  RECEIVED
+  NOTIFIED
   PICKED_UP
   RETURNED
 }
 
-enum PaymentStatus {
+enum NotifyChannel {
+  LINE
+  SMS
+  EMAIL
+}
+
+enum FacilityBookingStatus {
   PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  COMPLETED
+}
+
+enum FacilityBookingUpdateType {
+  COMMENT
+  STATUS_CHANGE
+  APPROVAL
+}
+
+enum MeterCycleStatus {
+  OPEN
+  CLOSED
+}
+
+enum MeterReadingStatus {
+  PENDING
+  SUBMITTED
+  APPROVED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
   PAID
-  FAILED
-  REFUNDED
+  OVERDUE
+  CANCELLED
+}
+
+enum InvoiceItemType {
+  RENT
+  WATER
+  ELECTRIC
+  CHARGE
+  EXTRA
+  DISCOUNT
+  PENALTY
+  OTHER
+  FACILITY
 }
 
 enum PaymentMethod {
-  CASH
   TRANSFER
-  QR
-  CARD
-  OTHER
+  PROMPTPAY
+  CASH
 }
 
-model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String?
-  name         String?
-  phone        String?
-  role         Role
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  // Tenant 
-  currentTenancyId String?  @unique
-  currentTenancy   Tenancy? @relation("CurrentTenancy", fields: [currentTenancyId], references: [id])
-
-  // relations
-  ownedCondos   OwnerCondo[] // Owner -> many condos
-  tenancies     Tenancy[] 
-  repairTickets RepairTicket[] @relation("RepairCreatedBy")
-  parcels       Parcel[]
-  payments      Payment[]
-  invoices      Invoice[]      @relation("InvoiceTenant")
-
-  announcements Announcement[] @relation("AnnouncementCreatedBy")
-
-  chatRoomsCreated ChatRoom[]        @relation("ChatRoomCreatedBy")
-  chatMemberships  ChatMember[]
-  chatMessages     ChatMessage[]
-  facilityBookings FacilityBooking[]
+enum PaymentNoticeStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
-model Condo {
-  id        String    @id @default(cuid())
-  name      String
-  type      CondoType
-  address   String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-
-  owners    OwnerCondo[]
-  buildings Building[]
-  rooms     Room[]
-  tenancies Tenancy[]
-
-  repairTickets RepairTicket[]
-  facilities    Facility[]
-  bookings      FacilityBooking[]
-  parcels       Parcel[]
-  payments      Payment[]
-  invoices      Invoice[]
-
-  chatRooms     ChatRoom[]
-  announcements Announcement[]
+enum PaymentTxnStatus {
+  PENDING
+  CONFIRMED
+  VOID
 }
 
-model OwnerCondo {
-  id        String   @id @default(cuid())
-  ownerId   String
-  condoId   String
-  createdAt DateTime @default(now())
-
-  owner User  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  condo Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
-
-  @@unique([ownerId, condoId])
-  @@index([condoId])
+enum TenantNotificationType {
+  ANNOUNCE
+  INVOICE
+  PAYMENT
+  PARCEL
+  REPAIR
+  FACILITY
+  CHAT
 }
 
-model Building {
-  id        String   @id @default(cuid())
-  condoId   String
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  condo Condo  @relation(fields: [condoId], references: [id], onDelete: Cascade)
-  rooms Room[]
-
-  @@unique([condoId, name])
-  @@index([condoId])
+enum OnboardingChannel {
+  LINE
+  WEB
 }
 
-model Room {
-  id         String     @id @default(cuid())
-  condoId    String
-  buildingId String?
-  label      String // เช่น A-101
-  floor      Int?
-  status     RoomStatus @default(AVAILABLE)
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
-
-  condo    Condo     @relation(fields: [condoId], references: [id], onDelete: Cascade)
-  building Building? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
-
-  tenancies     Tenancy[]
-  repairTickets RepairTicket[]
-
-  @@unique([condoId, label])
-  @@index([condoId])
-  @@index([buildingId])
+enum OnboardingEventType {
+  ENTER_CODE
+  LINK_SUCCESS
+  LINK_FAILED
 }
 
-model Tenancy {
-  id        String        @id @default(cuid())
-  tenantId  String
-  condoId   String
-  roomId    String
-  status    TenancyStatus @default(ACTIVE)
-  startDate DateTime      @default(now())
-  endDate   DateTime?
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-
-  tenant User  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  condo  Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
-  room   Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
-
-  // ฝั่งตรงข้ามของ currentTenancy
-  currentFor User? @relation("CurrentTenancy")
-
-  @@index([tenantId])
-  @@index([condoId])
-  @@index([roomId])
+enum RepairUpdateType {
+  COMMENT
+  STATUS_CHANGE
+  ASSIGNMENT
+  SCHEDULE
 }
 
-model RepairTicket {
-  id          String  @id @default(cuid())
-  condoId     String
-  roomId      String?
-  createdById String
-
-  category    String
-  location    String
-  description String
-  priority    RepairPriority @default(LOW)
-  status      RepairStatus   @default(OPEN)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  condo     Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
-  room      Room? @relation(fields: [roomId], references: [id], onDelete: SetNull)
-  createdBy User  @relation("RepairCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
-
-  images RepairImage[]
-  notes  RepairNote[]
-
-  @@index([condoId])
-  @@index([createdById])
-  @@index([roomId])
+enum UtilityBillingType {
+  METER
+  METER_MIN
+  FLAT
 }
 
-model RepairImage {
-  id        String   @id @default(cuid())
-  ticketId  String
-  url       String
-  createdAt DateTime @default(now())
-
-  ticket RepairTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-
-  @@index([ticketId])
-}
-
-model RepairNote {
-  id        String   @id @default(cuid())
-  ticketId  String
-  message   String
-  createdAt DateTime @default(now())
-
-  ticket RepairTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-
-  @@index([ticketId])
-}
-
-model Facility {
-  id          String   @id @default(cuid())
-  condoId     String
-  name        String
-  description String?
-  openTime    String? // "09:00"
-  closeTime   String? // "21:00"
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  condo    Condo             @relation(fields: [condoId], references: [id], onDelete: Cascade)
-  bookings FacilityBooking[]
-
-  @@unique([condoId, name])
-  @@index([condoId])
-}
-
-model FacilityBooking {
-  id         String        @id @default(cuid())
-  condoId    String
-  facilityId String
-  userId     String
-  startAt    DateTime
-  endAt      DateTime
-  status     BookingStatus @default(PENDING)
-  note       String?
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
-
-  condo    Condo    @relation(fields: [condoId], references: [id], onDelete: Cascade)
-  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([condoId])
-  @@index([facilityId])
-  @@index([userId])
-}
-
-model Parcel {
-  id         String       @id @default(cuid())
-  condoId    String
-  userId     String?
-  tracking   String?
-  carrier    String?
-  status     ParcelStatus @default(INCOMING)
-  note       String?
-  arrivedAt  DateTime?
-  pickedUpAt DateTime?
-  createdAt  DateTime     @default(now())
-  updatedAt  DateTime     @updatedAt
-
-  condo Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
-  user  User? @relation(fields: [userId], references: [id], onDelete: SetNull)
-
-  @@index([condoId])
-  @@index([userId])
-}
-
-model Invoice {
-  id        String        @id @default(cuid())
-  condoId   String
-  tenantId  String
-  period    String // เช่น "2026-01"
-  dueDate   DateTime
-  total     Int           @default(0)
-  status    PaymentStatus @default(PENDING)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-
-  condo  Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
-  tenant User  @relation("InvoiceTenant", fields: [tenantId], references: [id], onDelete: Cascade)
-
-  items    InvoiceItem[]
-  payments Payment[]
-
-  @@unique([tenantId, period])
-  @@index([condoId])
-  @@index([tenantId])
-}
-
-model InvoiceItem {
-  id        String   @id @default(cuid())
-  invoiceId String
-  name      String
-  amount    Int
-  createdAt DateTime @default(now())
-
-  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-
-  @@index([invoiceId])
-}
-
-model Payment {
-  id        String  @id @default(cuid())
-  condoId   String
-  userId    String?
-  invoiceId String?
-
-  amount Int
-  method PaymentMethod @default(TRANSFER)
-  status PaymentStatus @default(PENDING)
-  note   String?
-
-  paidAt    DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-
-  condo   Condo    @relation(fields: [condoId], references: [id], onDelete: Cascade)
-  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  invoice Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
-
-  @@index([condoId])
-  @@index([userId])
-  @@index([invoiceId])
-}
-
-model ChatRoom {
-  id          String   @id @default(cuid())
-  condoId     String
-  name        String
-  createdById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  condo     Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
-  createdBy User? @relation("ChatRoomCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-
-  members  ChatMember[]
-  messages ChatMessage[]
-
-  @@unique([condoId, name])
-  @@index([condoId])
-}
-
-model ChatMember {
-  id       String   @id @default(cuid())
-  roomId   String
-  userId   String
-  joinedAt DateTime @default(now())
-
-  room ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([roomId, userId])
-  @@index([userId])
-}
-
-model ChatMessage {
-  id        String   @id @default(cuid())
-  roomId    String
-  userId    String
-  content   String
-  createdAt DateTime @default(now())
-
-  room ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([roomId])
-  @@index([userId])
-}
-
-model Announcement {
-  id          String    @id @default(cuid())
-  condoId     String
-  title       String
-  content     String
-  createdById String?
-  publishedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  condo     Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
-  createdBy User? @relation("AnnouncementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-
-  @@index([condoId])
-  @@index([createdById])
+enum CondoSetupStep {
+  STEP_0
+  STEP_1
+  STEP_2
+  STEP_3
+  STEP_4
+  STEP_5
+  STEP_6
+  STEP_7
+  STEP_8
+  DONE
 }

@@ -1,100 +1,99 @@
-import { Router, Request, Response } from "express";
+import { Router } from "express";
 import { prisma } from "../prisma.js";
-
-
 
 const router = Router();
 
-router.get("/", async (_req: Request, res: Response) => {
-  try {
-    const users = await prisma.user.findMany({
-      orderBy: { id: "asc" },
-    });
-    res.json(users);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to fetch users" });
-  }
+// GET /users  -> list users
+router.get("/", async (_req, res) => {
+  const users = await prisma.user.findMany({
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      phone: true,
+      role: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  res.json(users);
 });
 
-router.get("/:id", async (req: Request, res: Response) => {
-  try {
-    const id = Number(req.params.id);
-    if (Number.isNaN(id)) {
-      return res.status(400).json({ error: "Invalid id" });
-    }
+// POST /users -> create user (test)
+router.post("/", async (req, res) => {
+  const { email, name, phone, role } = req.body;
 
-    const user = await prisma.user.findUnique({ where: { id } });
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    res.json(user);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to fetch user" });
+  if (!email || typeof email !== "string") {
+    return res.status(400).json({ error: "email is required" });
   }
+  if (role && typeof role !== "string") {
+    return res.status(400).json({ error: "role must be string" });
+  }
+
+  const created = await prisma.user.create({
+    data: {
+      email,
+      name: typeof name === "string" ? name : null,
+      phone: typeof phone === "string" ? phone : null,
+      role: role ?? "TENANT", // default เทส
+    } as any,
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      phone: true,
+      role: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  res.status(201).json(created);
 });
 
-router.post("/", async (req: Request, res: Response) => {
+// PATCH /users/:id -> update name/phone
+router.patch("/:id", async (req, res) => {
+  const id = req.params.id; // ✅ id เป็น String (cuid)
+  const { name, phone } = req.body;
+
   try {
-    const { email, name } = req.body;
-
-    if (!email || typeof email !== "string") {
-      return res.status(400).json({ error: "email is required" });
-    }
-
-    const created = await prisma.user.create({
-      data: { email, name },
-    });
-
-    res.status(201).json(created);
-  } catch (err: any) {
-    if (err?.code === "P2002") {
-      return res.status(409).json({ error: "Email already exists" });
-    }
-    console.error(err);
-    res.status(500).json({ error: "Failed to create user" });
-  }
-});
-
-router.patch("/:id", async (req: Request, res: Response) => {
-  try {
-    const id = Number(req.params.id);
-    const { name } = req.body;
-
-    if (Number.isNaN(id) || typeof name !== "string") {
-      return res.status(400).json({ error: "Invalid input" });
-    }
-
     const updated = await prisma.user.update({
       where: { id },
-      data: { name },
+      data: {
+        name: typeof name === "string" ? name : undefined,
+        phone: typeof phone === "string" ? phone : undefined,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        phone: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
 
     res.json(updated);
   } catch (err: any) {
-    if (err?.code === "P2025") {
-      return res.status(404).json({ error: "User not found" });
-    }
+    // Prisma: record not found
+    if (err?.code === "P2025") return res.status(404).json({ error: "User not found" });
     console.error(err);
     res.status(500).json({ error: "Failed to update user" });
   }
 });
 
-router.delete("/:id", async (req: Request, res: Response) => {
-  try {
-    const id = Number(req.params.id);
-    if (Number.isNaN(id)) {
-      return res.status(400).json({ error: "Invalid id" });
-    }
+// DELETE /users/:id
+router.delete("/:id", async (req, res) => {
+  const id = req.params.id;
 
+  try {
     await prisma.user.delete({ where: { id } });
     res.json({ ok: true });
   } catch (err: any) {
-    if (err?.code === "P2025") {
-      return res.status(404).json({ error: "User not found" });
-    }
+    if (err?.code === "P2025") return res.status(404).json({ error: "User not found" });
     console.error(err);
     res.status(500).json({ error: "Failed to delete user" });
   }

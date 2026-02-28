@@ -3,12 +3,17 @@ import cors from "cors";
 import dotenv from "dotenv";
 import apiRoutes from "./routes/index.js";
 import "dotenv/config";
+import usersRoutes from "./routes/users.routes.js";
+import authRoutes from "./routes/auth.routes.js";
+
 
 
 
 dotenv.config();
 
 const app = express();
+
+
 
 app.use(
   cors({
@@ -32,6 +37,11 @@ app.get("/ping", (_req, res) => {
 
 // mount api
 app.use("/api/v1",apiRoutes);
+app.use("/auth", authRoutes);
+
+
+
+
 
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
