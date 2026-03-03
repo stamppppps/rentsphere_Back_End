@@ -13,11 +13,7 @@ export function mockAuth(req: Request, res: Response, next: NextFunction) {
   const ok = role === "ADMIN" || role === "OWNER" || role === "TENANT";
   if (!ok) return res.status(400).json({ message: "Invalid x-mock-user role" });
 
-  req.user = {
-    id: idRaw || "cmkulzfpy0001s1tgs9xfuxaa",
-    email: "owner@rentsphere.com",
-    role: "OWNER",
-  };
+
 
   next();
 }
