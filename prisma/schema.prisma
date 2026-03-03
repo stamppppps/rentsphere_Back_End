@@ -8,59 +8,61 @@ datasource db {
 }
 
 model User {
-  id                            String                  @id @default(uuid()) @db.Uuid
-  email                         String?                 @unique
-  phone                         String?                 @unique
-  passwordHash                  String?
-  role                          Role                    @default(TENANT)
-  name                          String?
-  isActive                      Boolean                 @default(true)
-  verifyChannel                 VerifyChannel           @default(EMAIL)
-  emailVerifiedAt               DateTime?
-  phoneVerifiedAt               DateTime?
-  createdAt                     DateTime                @default(now())
-  updatedAt                     DateTime?               @updatedAt
-  announcementsCreated          Announcement[]          @relation("AnnouncementCreatedBy")
-  announcementReads             AnnouncementRead[]      @relation("AnnouncementReadByTenant")
-  auditLogsActed                AuditLog[]              @relation("AuditActor")
-  chatMessages                  ChatMessage[]
-  chatMessageReads              ChatMessageRead[]
-  chatRoomsCreated              ChatRoom[]              @relation("ChatRoomCreatedBy")
-  chatRoomMembers               ChatRoomMember[]
-  condosOwned                   Condo[]                 @relation("CondoOwner")
-  condoAssetsUploaded           CondoAsset[]            @relation("CondoAssetUploader")
-  facilityBookingsApproved      FacilityBooking[]       @relation("FacilityBookingApprovedBy")
-  facilityBookingsCreated       FacilityBooking[]       @relation("FacilityBookingCreatedBy")
-  tenantFacilityBookings        FacilityBooking[]       @relation("FacilityBookingTenant")
-  facilityBookingUpdatesCreated FacilityBookingUpdate[] @relation("FacilityBookingUpdateCreatedBy")
-  invoicesCreated               Invoice[]               @relation("InvoiceCreatedBy")
-  lineAccount                   LineAccount?
-  meterCyclesClosed             MeterCycle[]            @relation("MeterCycleClosedBy")
-  meterCyclesOpened             MeterCycle[]            @relation("MeterCycleOpenedBy")
-  meterReadingsRecorded         MeterReading[]          @relation("MeterReadingRecordedBy")
-  tenantParcels                 Parcel[]                @relation("ParcelTenant")
-  parcelAttachmentsUploaded     ParcelAttachment[]      @relation("ParcelAttachmentUploadedBy")
-  passwordResetRequests         PasswordResetRequest[]
-  paymentNoticesReviewed        PaymentNotice[]         @relation("PaymentReviewedBy")
-  tenantPaymentNotices          PaymentNotice[]         @relation("PaymentNoticeTenant")
-  paymentTxnsConfirmed          PaymentTransaction[]    @relation("PaymentConfirmedBy")
-  paymentUpdatesMade            PaymentUpdate[]         @relation("PaymentUpdateBy")
-  rentalContracts               RentalContract[]        @relation("ContractTenant")
-  repairAttachmentsUploaded     RepairAttachment[]      @relation("RepairAttachmentUploadedBy")
-  repairRequestsCreated         RepairRequest[]         @relation("RepairCreatedBy")
-  tenantRepairRequests          RepairRequest[]         @relation("RepairTenant")
-  repairUpdatesCreated          RepairUpdate[]          @relation("RepairUpdateCreatedBy")
-  reservationsCreated           RoomReservation[]       @relation("ReservationCreatedBy")
-  roomStatusChanges             RoomStatusHistory[]     @relation("RoomStatusChangedBy")
-  staffInvitesCreated           StaffInvite[]           @relation("StaffInviteCreatedBy")
-  staffMemberships              StaffMembership[]       @relation("UserStaffMembership")
-  tenantNotifications           TenantNotification[]    @relation("TenantNotificationUser")
-  onboardingEvents              TenantOnboardingEvent[] @relation("TenantOnboardingUser")
-  tenantProfile                 TenantProfile?
-  residencies                   TenantResidency[]       @relation("ResidencyTenant")
-  tenantCodesCreated            TenantRoomCode[]        @relation("TenantCodeCreatedBy")
-  tenantCodesUsed               TenantRoomCode[]        @relation("TenantCodeUsedBy")
-  verifyRequests                VerifyRequest[]
+  id                              String                    @id @default(uuid()) @db.Uuid
+  email                           String?                   @unique
+  phone                           String?                   @unique
+  passwordHash                    String?
+  role                            Role                      @default(TENANT)
+  name                            String?
+  isActive                        Boolean                   @default(true)
+  verifyChannel                   VerifyChannel             @default(EMAIL)
+  emailVerifiedAt                 DateTime?
+  phoneVerifiedAt                 DateTime?
+  createdAt                       DateTime                  @default(now())
+  updatedAt                       DateTime?                 @updatedAt
+  announcementsCreated            Announcement[]            @relation("AnnouncementCreatedBy")
+  announcementReads               AnnouncementRead[]        @relation("AnnouncementReadByTenant")
+  auditLogsActed                  AuditLog[]                @relation("AuditActor")
+  chatMessages                    ChatMessage[]
+  chatMessageReads                ChatMessageRead[]
+  chatRoomsCreated                ChatRoom[]                @relation("ChatRoomCreatedBy")
+  chatRoomMembers                 ChatRoomMember[]
+  condosOwned                     Condo[]                   @relation("CondoOwner")
+  condoAssetsUploaded             CondoAsset[]              @relation("CondoAssetUploader")
+  facilityBookingsApproved        FacilityBooking[]         @relation("FacilityBookingApprovedBy")
+  facilityBookingsCreated         FacilityBooking[]         @relation("FacilityBookingCreatedBy")
+  tenantFacilityBookings          FacilityBooking[]         @relation("FacilityBookingTenant")
+  facilityBookingUpdatesCreated   FacilityBookingUpdate[]   @relation("FacilityBookingUpdateCreatedBy")
+  invoicesCreated                 Invoice[]                 @relation("InvoiceCreatedBy")
+  lineAccount                     LineAccount?
+  meterCyclesClosed               MeterCycle[]              @relation("MeterCycleClosedBy")
+  meterCyclesOpened               MeterCycle[]              @relation("MeterCycleOpenedBy")
+  meterReadingsRecorded           MeterReading[]            @relation("MeterReadingRecordedBy")
+  tenantParcels                   Parcel[]                  @relation("ParcelTenant")
+  parcelAttachmentsUploaded       ParcelAttachment[]        @relation("ParcelAttachmentUploadedBy")
+  passwordResetRequests           PasswordResetRequest[]
+  paymentNoticesReviewed          PaymentNotice[]           @relation("PaymentReviewedBy")
+  tenantPaymentNotices            PaymentNotice[]           @relation("PaymentNoticeTenant")
+  paymentTxnsConfirmed            PaymentTransaction[]      @relation("PaymentConfirmedBy")
+  paymentUpdatesMade              PaymentUpdate[]           @relation("PaymentUpdateBy")
+  rentalContracts                 RentalContract[]          @relation("ContractTenant")
+  repairAttachmentsUploaded       RepairAttachment[]        @relation("RepairAttachmentUploadedBy")
+  repairRequestsCreated           RepairRequest[]           @relation("RepairCreatedBy")
+  tenantRepairRequests            RepairRequest[]           @relation("RepairTenant")
+  repairUpdatesCreated            RepairUpdate[]            @relation("RepairUpdateCreatedBy")
+  reservationsCreated             RoomReservation[]         @relation("ReservationCreatedBy")
+  roomStatusChanges               RoomStatusHistory[]       @relation("RoomStatusChangedBy")
+  staffInvitesCreated             StaffInvite[]             @relation("StaffInviteCreatedBy")
+  staffMemberships                StaffMembership[]         @relation("UserStaffMembership")
+  tenantNotifications             TenantNotification[]      @relation("TenantNotificationUser")
+  onboardingEvents                TenantOnboardingEvent[]   @relation("TenantOnboardingUser")
+  tenantProfile                   TenantProfile?
+  residencies                     TenantResidency[]         @relation("ResidencyTenant")
+  tenantCodesCreated              TenantRoomCode[]          @relation("TenantCodeCreatedBy")
+  tenantCodesUsed                 TenantRoomCode[]          @relation("TenantCodeUsedBy")
+  verifyRequests                  VerifyRequest[]
+  condoBankAccountsCreated        CondoBankAccount[]        @relation("CondoBankAccountCreatedBy")
+  condoPaymentInstructionsUpdated CondoPaymentInstruction[] @relation("CondoPaymentInstructionUpdatedBy")
 }
 
 model AuditLog {
@@ -202,35 +204,49 @@ model CondoService {
   createdAt    DateTime @default(now())
   condo        Condo    @relation(fields: [condoId], references: [id], onDelete: Cascade)
 
+  roomAssignments RoomExtraChargeAssignment[]
+
   @@unique([condoId, name])
   @@index([condoId])
 }
 
 model CondoBankAccount {
-  id                  String               @id @default(uuid()) @db.Uuid
-  condoId             String               @db.Uuid
-  bankName            String
-  bankCode            String?
-  accountName         String
-  accountNo           String
-  isActive            Boolean              @default(true)
-  createdAt           DateTime             @default(now())
+  id      String @id @default(uuid()) @db.Uuid
+  condoId String @db.Uuid
+
+  bankName    String
+  bankCode    String? // เดิม optional ได้ (ตาม schema เดิม)
+  accountName String
+  accountNo   String
+
+  createdBy String? @db.Uuid
+  creator   User?   @relation("CondoBankAccountCreatedBy", fields: [createdBy], references: [id])
+
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime? @updatedAt
+
   condo               Condo                @relation(fields: [condoId], references: [id], onDelete: Cascade)
   paymentNotices      PaymentNotice[]
   paymentTransactions PaymentTransaction[]
 
   @@index([condoId])
+  @@index([createdBy])
 }
 
 model CondoPaymentInstruction {
   condoId String @id @db.Uuid
   message String
 
+  updatedBy String? @db.Uuid
+  updater   User?   @relation("CondoPaymentInstructionUpdatedBy", fields: [updatedBy], references: [id])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   condo Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
 
+  @@index([updatedBy])
   @@map("CondoPaymentInstruction")
 }
 
@@ -262,17 +278,20 @@ model CondoOnboarding {
 }
 
 model CondoFloor {
-  id        String    @id @default(uuid()) @db.Uuid
-  condoId   String    @db.Uuid
-  floorNo   Int
-  label     String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime? @updatedAt
-  condo     Condo     @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  id         String   @id @default(uuid()) @db.Uuid
+  condoId    String   @db.Uuid
+  floorNo    Int
+  label      String?
+  roomsCount Int      @default(1)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  @@unique([condoId, floorNo])
+  condo      Condo    @relation(fields: [condoId], references: [id], onDelete: Cascade)
+
   @@index([condoId])
+  @@unique([condoId, floorNo])
 }
+
 
 model UtilitySetting {
   id              String    @id @default(uuid()) @db.Uuid
@@ -356,18 +375,21 @@ model ExtraChargeTemplate {
 }
 
 model RoomExtraChargeAssignment {
-  id             String              @id @default(uuid()) @db.Uuid
-  roomId         String              @db.Uuid
-  templateId     String              @db.Uuid
-  isEnabled      Boolean             @default(true)
-  amountOverride Decimal?            @db.Decimal(12, 2)
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime?           @updatedAt
-  room           Room                @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  template       ExtraChargeTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  id        String   @id @default(cuid())
+  roomId    String   @db.Uuid
+  serviceId String   // CondoService.id เป็น cuid() => String
+  templateId String?  @db.Uuid 
+  createdAt DateTime @default(now())
+  createdBy String?
 
-  @@unique([roomId, templateId])
+  room      Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  service   CondoService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  template ExtraChargeTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+
+  @@unique([roomId, serviceId])
   @@index([roomId])
+  @@index([serviceId])
   @@index([templateId])
 }
 
@@ -399,6 +421,7 @@ model Room {
   statusHistories        RoomStatusHistory[]
   residencies            TenantResidency[]
   tenantCodes            TenantRoomCode[]
+  
 
   @@unique([condoId, roomNo])
   @@index([condoId])
