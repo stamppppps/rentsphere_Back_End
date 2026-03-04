@@ -1,14 +1,100 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
+import bcrypt from "bcrypt";
+import crypto from "crypto";
 import { authRequired } from "../middlewares/auth.js";
 import { requireRole } from "../middlewares/requireRole.js";
 import { uploadMemory } from "../middlewares/uploadMemory.js";
 import { prisma } from "../prisma.js";
 import { cloudinary } from "../utils/cloudinary.js";
+import { sendStaffInviteEmail } from "../utils/mailer.js";
 
 const router = Router();
 
 router.use(authRequired, requireRole(["OWNER"]));
+
+
+
+const DEFAULT_PERMISSION_MODULES = [
+  "DASHBOARD",
+  "ROOMS",
+  "BILLING",
+  "PAYMENT",
+  "PARCEL",
+  "REPAIR",
+  "FACILITY",
+  "ANNOUNCE",
+  "CHAT",
+  "STAFF",
+  "TENANT",
+] as const;
+
+type PermissionModuleStr = (typeof DEFAULT_PERMISSION_MODULES)[number];
+
+async function ensurePermissionCatalog(modules: PermissionModuleStr[]) {
+  await Promise.all(
+    modules.map((m) =>
+      prisma.permissionCatalog.upsert({
+        where: { code: `${m}_ACCESS` },
+        create: {
+          code: `${m}_ACCESS`,
+          nameTh: `${m} access`,
+          module: m as any,
+          isActive: true,
+        },
+        update: { isActive: true, module: m as any },
+      })
+    )
+  );
+}
+
+async function assertOwnerCondoOrThrow(ownerId: string, condoId: string) {
+  const condo = await prisma.condo.findFirst({
+    where: { id: condoId, ownerUserId: ownerId },
+    select: { id: true, nameTh: true }, 
+  });
+  if (!condo) {
+    const err: any = new Error("Forbidden (not your condo)");
+    
+
+    err.status = 403;
+    throw err;
+  }
+  return condo;
+}
+
+function genTempPassword() {
+  return crypto.randomBytes(8).toString("base64url").slice(0, 10);
+}
+
+async function getAllowedModulesForMembership(membershipId: string) {
+  const overrides = await prisma.staffPermissionOverride.findMany({
+    where: { membershipId, allowed: true },
+    select: { permission: { select: { module: true } } },
+  });
+  return overrides.map((x) => x.permission.module);
+}
+
+async function replaceMembershipOverrides(membershipId: string, modules: PermissionModuleStr[]) {
+  await prisma.staffPermissionOverride.deleteMany({ where: { membershipId } });
+  if (modules.length === 0) return;
+
+  const perms = await prisma.permissionCatalog.findMany({
+    where: { code: { in: modules.map((m) => `${m}_ACCESS`) } },
+    select: { id: true, code: true },
+  });
+  const map = new Map(perms.map((p) => [p.code, p.id]));
+
+  await prisma.staffPermissionOverride.createMany({
+    data: modules
+      .map((m) => ({
+        permissionId: map.get(`${m}_ACCESS`),
+        membershipId,
+        allowed: true,
+      }))
+      .filter((x): x is { permissionId: string; membershipId: string; allowed: boolean } => Boolean(x.permissionId)),
+  });
+}
 
 router.get("/me", async (req, res) => {
   res.json({ message: "OWNER OK", user: req.user });
@@ -91,7 +177,7 @@ function pad2(n: number) {
 async function assertOwnerCondo(ownerId: string, condoId: string) {
   const condo = await prisma.condo.findFirst({
     where: { id: condoId, ownerUserId: ownerId },
-    select: { id: true },
+    select: { id: true, nameTh: true },
   });
   return condo;
 }
@@ -108,6 +194,8 @@ router.post("/condos/:condoId/logo", uploadMemory.single("logo"), async (req, re
 
     const condo = await assertOwnerCondo(ownerId, condoId);
     if (!condo) return res.status(403).json({ error: "Forbidden (not your condo)" });
+
+   
 
     if (!req.file) return res.status(400).json({ error: "Missing file field 'logo'" });
     const file = req.file;
@@ -1313,4 +1401,301 @@ router.put("/condos/:condoId/payment-instruction", async (req, res) => {
   }
 });
 
+/** =============================
+ * Staff management (Owner) - MVP
+ * =============================
+ * สร้าง/ลิสต์/แก้ไข เจ้าหน้าที่ พร้อมสิทธิ์เป็นรายโมดูล
+ */
+
+router.get("/condos/:condoId/staff", async (req, res) => {
+  const ownerId = req.user?.id;
+  if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
+
+  const condoId = String(req.params.condoId);
+  try {
+    await ensurePermissionCatalog(DEFAULT_PERMISSION_MODULES as any);
+    const condo = await assertOwnerCondo(ownerId, condoId);
+    if (!condo) return res.status(403).json({ error: "Forbidden (not your condo)" });
+
+    const memberships = await prisma.staffMembership.findMany({
+      where: { condoId },
+      select: {
+        id: true,
+        staffUserId: true,
+        staffPosition: true,
+        isActive: true,
+        createdAt: true,
+        staff: { select: { id: true, name: true, email: true, phone: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const items = await Promise.all(
+      memberships.map(async (m) => ({
+        id: m.id,
+        staffUserId: m.staffUserId,
+        fullName: m.staff?.name ?? "",
+        email: m.staff?.email ?? "",
+        phone: m.staff?.phone ?? "",
+        staffPosition: m.staffPosition,
+        isActive: m.isActive,
+        allowedModules: await getAllowedModulesForMembership(m.id),
+      }))
+    );
+
+    return res.json({ items });
+  } catch (err: any) {
+    console.error("LIST STAFF ERROR:", err);
+    return res.status(500).json({ error: "Failed to list staff" });
+  }
+});
+
+router.post("/condos/:condoId/staff", async (req, res) => {
+  const ownerId = (req as any).user?.id;
+  if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
+
+  const condoId = String(req.params.condoId);
+  const body = req.body ?? {};
+
+  const fullName = String(body.fullName ?? "").trim();
+  const email = String(body.email ?? "").trim().toLowerCase();
+  const phone = body.phone ? String(body.phone).trim() : null;
+
+  const staffPosition = String(body.staffPosition ?? "").trim();
+
+  const allowedModulesRaw = Array.isArray(body.allowedModules) ? body.allowedModules : [];
+  const allowedModules = allowedModulesRaw
+    .map((m: any) => String(m))
+    .filter((m: any) => DEFAULT_PERMISSION_MODULES.includes(m as any)) as PermissionModuleStr[];
+
+  if (!fullName) return res.status(400).json({ error: "fullName is required" });
+  if (!email) return res.status(400).json({ error: "email is required" });
+  if (!staffPosition) return res.status(400).json({ error: "staffPosition is required" });
+
+  try {
+    await ensurePermissionCatalog(DEFAULT_PERMISSION_MODULES as any);
+
+    const condo = await assertOwnerCondo(ownerId, condoId);
+    if (!condo) return res.status(403).json({ error: "Forbidden (not your condo)" });
+
+    // 1) หา user เดิมจาก email/phone
+    const existing = await prisma.user.findFirst({
+      where: { OR: [{ email }, ...(phone ? [{ phone }] : [])] },
+      select: {
+        id: true,
+        role: true,
+        email: true,
+        phone: true,
+        name: true,
+        emailVerifiedAt: true,
+        phoneVerifiedAt: true,
+      },
+    });
+
+    if (existing && existing.role !== "STAFF") {
+      return res.status(400).json({ error: "This email/phone is already used by non-staff user" });
+    }
+
+    let staffUser = existing;
+
+    // 2) Invite Link flow
+    if (!staffUser) {
+      const initialSecret = crypto.randomBytes(24).toString("base64url");
+      const passwordHash = await bcrypt.hash(initialSecret, 10);
+
+      staffUser = await prisma.user.create({
+        data: {
+          email,
+          phone,
+          name: fullName,
+          role: "STAFF",
+          passwordHash,
+          isActive: true,
+          verifyChannel: "EMAIL",
+          emailVerifiedAt: new Date(),
+          phoneVerifiedAt: phone ? new Date() : null,
+        },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          name: true,
+          role: true, 
+          emailVerifiedAt: true,
+          phoneVerifiedAt: true,
+        },
+      });
+    } else {
+      staffUser = await prisma.user.update({
+        where: { id: staffUser.id },
+        data: {
+          name: fullName,
+          phone: phone ?? undefined,
+          email,
+          role: "STAFF",
+          isActive: true,
+          emailVerifiedAt: staffUser.emailVerifiedAt ?? new Date(),
+          phoneVerifiedAt: staffUser.phoneVerifiedAt ?? (phone ? new Date() : undefined),
+        },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          name: true,
+          role: true,
+          emailVerifiedAt: true,
+          phoneVerifiedAt: true,
+        },
+      });
+    }
+
+    // ✅ Guard กัน TS/กันหลุด
+    if (!staffUser) return res.status(500).json({ error: "Failed to create staff user" });
+
+    // 3) membership
+    const membership = await prisma.staffMembership.upsert({
+      where: { staffUserId_condoId: { staffUserId: staffUser.id, condoId } },
+      create: {
+        staffUserId: staffUser.id,
+        condoId,
+        staffPosition,
+        isActive: true,
+      },
+      update: {
+        staffPosition,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        staffPosition: true,
+        isActive: true,
+      },
+    });
+
+    await replaceMembershipOverrides(membership.id, allowedModules);
+
+    // 4) Invite
+    const token = crypto.randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const frontend = process.env.FRONTEND_URL || "http://localhost:5173";
+    const inviteUrl = `${frontend}/staff/invite/${token}`;
+
+    const invite = await prisma.staffInvite.create({
+      data: {
+        condoId,
+        staffUserId: staffUser.id,
+        email,
+        phone: phone ?? null,
+        token,
+        staffPosition,
+        expiresAt,
+        createdByUserId: ownerId,
+      },
+      select: { token: true, expiresAt: true },
+    });
+
+    // 5) ส่งอีเมล (Email อย่างเดียว)
+    let emailSent = false;
+    try {
+      await sendStaffInviteEmail(email, {
+        inviteUrl,
+        condoName: condo.nameTh, // ✅ ตอนนี้มีแล้ว เพราะ assertOwnerCondo select nameTh
+      });
+      emailSent = true;
+    } catch (mailErr) {
+      console.error("SEND STAFF INVITE EMAIL ERROR:", mailErr);
+    }
+
+    return res.status(201).json({
+      item: {
+        id: membership.id,
+        staffUserId: staffUser.id,
+        fullName: staffUser.name,
+        email: staffUser.email,
+        phone: staffUser.phone,
+        staffPosition: membership.staffPosition,
+        isActive: membership.isActive,
+        allowedModules,
+      },
+      invite: {
+        token: invite.token,
+        inviteUrl,
+        expiresAt: invite.expiresAt,
+      },
+      emailSent,
+    });
+  } catch (err: any) {
+    console.error("CREATE STAFF ERROR:", err);
+    return res.status(500).json({ error: "Failed to create staff" });
+  }
+});
+
+router.patch("/condos/:condoId/staff/:membershipId", async (req, res) => {
+  const ownerId = req.user?.id;
+  if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
+
+  const condoId = String(req.params.condoId);
+  const membershipId = String(req.params.membershipId);
+  const body = req.body ?? {};
+
+  try {
+    await ensurePermissionCatalog(DEFAULT_PERMISSION_MODULES as any);
+    const condo = await assertOwnerCondo(ownerId, condoId);
+    if (!condo) return res.status(403).json({ error: "Forbidden (not your condo)" });
+
+    const membership = await prisma.staffMembership.findFirst({
+      where: { id: membershipId, condoId },
+      select: { id: true, staffUserId: true },
+    });
+    if (!membership) return res.status(404).json({ error: "Staff membership not found" });
+
+    const dataMem: any = {};
+    if ("staffPosition" in body) dataMem.staffPosition = body.staffPosition ? String(body.staffPosition).trim() : null;
+    if ("isActive" in body) dataMem.isActive = Boolean(body.isActive);
+    if (Object.keys(dataMem).length) await prisma.staffMembership.update({ where: { id: membershipId }, data: dataMem });
+
+    const dataUser: any = {};
+    if ("fullName" in body) dataUser.name = body.fullName ? String(body.fullName).trim() : undefined;
+    if ("email" in body) dataUser.email = body.email ? String(body.email).trim().toLowerCase() : undefined;
+    if ("phone" in body) dataUser.phone = body.phone ? String(body.phone).trim() : undefined;
+    if (Object.keys(dataUser).length) await prisma.user.update({ where: { id: membership.staffUserId }, data: dataUser });
+
+    if (Array.isArray(body.allowedModules)) {
+      const allowedModules = body.allowedModules
+        .map((m: any) => String(m))
+        .filter((m: any) => DEFAULT_PERMISSION_MODULES.includes(m as any)) as PermissionModuleStr[];
+      await replaceMembershipOverrides(membershipId, allowedModules);
+    }
+
+    const row = await prisma.staffMembership.findUnique({
+      where: { id: membershipId },
+      select: {
+        id: true,
+        staffUserId: true,
+        staffPosition: true,
+        isActive: true,
+        staff: { select: { name: true, email: true, phone: true } },
+      },
+    });
+
+    return res.json({
+      item: {
+        id: row!.id,
+        staffUserId: row!.staffUserId,
+        fullName: row!.staff?.name ?? "",
+        email: row!.staff?.email ?? "",
+        phone: row!.staff?.phone ?? "",
+        staffPosition: row!.staffPosition,
+        isActive: row!.isActive,
+        allowedModules: await getAllowedModulesForMembership(row!.id),
+      },
+    });
+  } catch (err: any) {
+    console.error("UPDATE STAFF ERROR:", err);
+    return res.status(500).json({ error: "Failed to update staff" });
+  }
+});
+
 export default router;
+
+

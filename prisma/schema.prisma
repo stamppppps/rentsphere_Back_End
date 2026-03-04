@@ -63,6 +63,8 @@ model User {
   verifyRequests                  VerifyRequest[]
   condoBankAccountsCreated        CondoBankAccount[]        @relation("CondoBankAccountCreatedBy")
   condoPaymentInstructionsUpdated CondoPaymentInstruction[] @relation("CondoPaymentInstructionUpdatedBy")
+
+  staffInvitesTarget StaffInvite[] @relation("StaffInviteTargetUser")
 }
 
 model AuditLog {
@@ -286,12 +288,11 @@ model CondoFloor {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  condo      Condo    @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  condo Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
 
-  @@index([condoId])
   @@unique([condoId, floorNo])
+  @@index([condoId])
 }
-
 
 model UtilitySetting {
   id              String    @id @default(uuid()) @db.Uuid
@@ -375,17 +376,16 @@ model ExtraChargeTemplate {
 }
 
 model RoomExtraChargeAssignment {
-  id        String   @id @default(cuid())
-  roomId    String   @db.Uuid
-  serviceId String   // CondoService.id เป็น cuid() => String
-  templateId String?  @db.Uuid 
-  createdAt DateTime @default(now())
-  createdBy String?
+  id         String   @id @default(cuid())
+  roomId     String   @db.Uuid
+  serviceId  String // CondoService.id เป็น cuid() => String
+  templateId String?  @db.Uuid
+  createdAt  DateTime @default(now())
+  createdBy  String?
 
-  room      Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  service   CondoService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  room     Room                 @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  service  CondoService         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   template ExtraChargeTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
-
 
   @@unique([roomId, serviceId])
   @@index([roomId])
@@ -421,7 +421,6 @@ model Room {
   statusHistories        RoomStatusHistory[]
   residencies            TenantResidency[]
   tenantCodes            TenantRoomCode[]
-  
 
   @@unique([condoId, roomNo])
   @@index([condoId])
@@ -619,20 +618,42 @@ model ContractMonthlyCharge {
   @@index([contractId])
 }
 
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
 model StaffInvite {
-  id            String    @id @default(uuid()) @db.Uuid
-  condoId       String    @db.Uuid
-  email         String
-  token         String    @unique
-  staffPosition String?
-  status        String    @default("PENDING")
-  expiresAt     DateTime?
-  createdBy     String?   @db.Uuid
-  createdAt     DateTime  @default(now())
-  condo         Condo     @relation(fields: [condoId], references: [id], onDelete: Cascade)
-  creator       User?     @relation("StaffInviteCreatedBy", fields: [createdBy], references: [id])
+  id      String @id @default(uuid()) @db.Uuid
+  condoId String @db.Uuid
+  condo   Condo  @relation(fields: [condoId], references: [id])
+
+  staffUserId String? @db.Uuid
+  staffUser   User?   @relation("StaffInviteTargetUser", fields: [staffUserId], references: [id])
+
+  email String?
+  phone String?
+
+  token String @unique
+
+  staffPosition String
+  status        InviteStatus @default(PENDING)
+  expiresAt     DateTime
+  usedAt        DateTime?
+
+  createdByUserId String @db.Uuid
+  createdByUser   User   @relation("StaffInviteCreatedBy", fields: [createdByUserId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([condoId])
+  @@index([email])
+  @@index([phone])
+  @@index([token])
+  @@index([staffUserId])
 }
 
 model StaffMembership {

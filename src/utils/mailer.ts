@@ -60,3 +60,54 @@ export async function sendVerifyEmail(
     `,
   });
 }
+export async function sendStaffInviteEmail(
+  to: string,
+  opts: { inviteUrl: string; condoName?: string }
+) {
+  assertMailConfig();
+  const { from } = getMailConfig();
+  const transporter = createTransporter();
+
+  await transporter.sendMail({
+    from,
+    to,
+    subject: "เชิญเข้าใช้งาน RentSphere (เจ้าหน้าที่)",
+    html: `
+      <div style="font-family: Arial, sans-serif; line-height:1.6">
+        <h2>คุณได้รับเชิญเป็นเจ้าหน้าที่</h2>
+
+        <p>คุณถูกเชิญให้เข้าร่วมระบบจัดการคอนโด ${
+          opts.condoName ?? ""
+        } ใน RentSphere</p>
+
+        <p>กดปุ่มด้านล่างเพื่อตั้งรหัสผ่านและเริ่มใช้งาน</p>
+
+        <p style="margin:24px 0">
+          <a href="${opts.inviteUrl}"
+             style="
+              background:#2563eb;
+              color:white;
+              padding:12px 18px;
+              text-decoration:none;
+              border-radius:8px;
+              font-weight:600;
+             ">
+             ตั้งรหัสผ่าน
+          </a>
+        </p>
+
+        <p style="color:#666">
+          หากปุ่มไม่ทำงาน ให้คัดลอกลิงก์นี้ไปเปิดในเบราว์เซอร์
+        </p>
+
+        <p style="word-break:break-all;color:#333">
+          ${opts.inviteUrl}
+        </p>
+
+        <p style="color:#999;font-size:12px">
+          ลิงก์นี้มีอายุจำกัดเพื่อความปลอดภัย
+        </p>
+      </div>
+    `,
+  });
+}
