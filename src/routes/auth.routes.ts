@@ -271,23 +271,46 @@ router.post("/verify/resend", async (req, res) => {
   }
 });
 
+
 // STEP 3) LOGIN 
 router.post("/login", async (req, res) => {
   try {
-    const { email, password } = (req.body ?? {}) as { email?: string; password?: string };
-    const cleanEmail = toCleanEmail(email);
+    const { email, phone, identifier, password } = (req.body ?? {}) as {
+      email?: string;
+      phone?: string;
+      identifier?: string;
+      password?: string;
+    };
 
-    if (!cleanEmail || !assertString(password)) {
-      return res.status(400).json({ error: "email and password are required" });
+    const loginIdRaw = email ?? phone ?? identifier;
+    if (!assertString(loginIdRaw) || !assertString(password)) {
+      return res.status(400).json({ error: "email/phone and password are required" });
     }
 
-    const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
+    const loginId = String(loginIdRaw).trim();
+    const isEmail = loginId.includes("@");
+    const cleanEmail = isEmail ? toCleanEmail(loginId) : null;
+
+    if (isEmail && !cleanEmail) {
+      return res.status(400).json({ error: "invalid email" });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: isEmail ? { email: cleanEmail! } : { phone: loginId },
+    });
+
     if (!user || !user.passwordHash) return res.status(401).json({ error: "Invalid credentials" });
+
+  
+    if ((user as any).isActive === false) {
+      return res.status(403).json({ error: "Account is inactive" });
+    }
 
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ error: "Invalid credentials" });
 
-    const need = (user as any).verifyChannel as VerifyChannel; 
+   
+    const need = (user as any).verifyChannel as VerifyChannel;
     const verified =
       need === "EMAIL" ? !!(user as any).emailVerifiedAt : !!(user as any).phoneVerifiedAt;
 
@@ -295,10 +318,38 @@ router.post("/login", async (req, res) => {
       return res.status(403).json({ error: `Please verify your ${need.toLowerCase()} first` });
     }
 
+   
+    let staffMemberships: any[] | undefined = undefined;
+    if (user.role === "STAFF") {
+      const memberships = await prisma.staffMembership.findMany({
+        where: { staffUserId: user.id, isActive: true },
+        select: {
+          id: true,
+          condoId: true,
+          staffPosition: true,
+          condo: { select: { id: true, nameTh: true, nameEn: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (memberships.length === 0) {
+        return res.status(403).json({ error: "STAFF has no active membership" });
+      }
+
+      staffMemberships = memberships.map((m) => ({
+        id: m.id,
+        condoId: m.condoId,
+        condoName: m.condo?.nameTh ?? m.condo?.nameEn ?? "—",
+        staffPosition: m.staffPosition,
+      }));
+    }
+
     const token = signToken({ id: user.id, role: user.role });
+
     return res.json({
-      user: { id: user.id, email: user.email, name: user.name, role: user.role },
+      user: { id: user.id, email: user.email, phone: user.phone, name: user.name, role: user.role },
       token,
+      ...(staffMemberships ? { staffMemberships } : {}),
     });
   } catch (e) {
     console.error(e);
@@ -396,13 +447,52 @@ router.post("/password/reset", async (req, res) => {
 
 
 // ME + LOGOUT
-router.get("/me",authRequired,async(req,res)=>{
-  const userId=req.user!.id;
-  const user=await prisma.user.findUnique({
-    where:{id:userId},
-    select:{id:true,email:true,name:true,role:true,phone:true},
+router.get("/me", authRequired, async (req, res) => {
+  const userId = req.user!.id;
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true, name: true, role: true, phone: true },
   });
-  return res.json({user});
+
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  // STAFF: ส่ง memberships + สิทธิ์ 
+  if (user.role === "STAFF") {
+    const memberships = await prisma.staffMembership.findMany({
+      where: { staffUserId: userId, isActive: true },
+      select: {
+        id: true,
+        condoId: true,
+        staffPosition: true,
+        isActive: true,
+        condo: { select: { id: true, nameTh: true, nameEn: true } },
+        permissionOverrides: {
+          select: {
+            allowed: true,
+            permission: { select: { module: true, code: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return res.json({
+      user,
+      staffMemberships: memberships.map((m) => ({
+        id: m.id,
+        condoId: m.condoId,
+        condoName: m.condo?.nameTh ?? m.condo?.nameEn ?? "—",
+        staffPosition: m.staffPosition,
+        isActive: m.isActive,
+        allowedModules: (m.permissionOverrides ?? [])
+          .filter((x) => x.allowed)
+          .map((x) => x.permission.module),
+      })),
+    });
+  }
+
+  return res.json({ user });
 });
 
 
