@@ -63,6 +63,8 @@ model User {
   verifyRequests                  VerifyRequest[]
   condoBankAccountsCreated        CondoBankAccount[]        @relation("CondoBankAccountCreatedBy")
   condoPaymentInstructionsUpdated CondoPaymentInstruction[] @relation("CondoPaymentInstructionUpdatedBy")
+  advancePaymentsCreated          AdvancePayment[]          @relation("AdvancePaymentCreatedBy")
+  roomContractsCreated            RoomContract[]            @relation("RoomContractCreatedBy")
 
   staffInvitesTarget StaffInvite[] @relation("StaffInviteTargetUser")
 }
@@ -157,6 +159,8 @@ model Condo {
   tenantCodes              TenantRoomCode[]
   utilityRates             UtilityRate[]
   utilitySetting           UtilitySetting?
+  advancePayments          AdvancePayment[]
+  roomContracts            RoomContract[]
 
   paymentInstruction CondoPaymentInstruction?
 
@@ -421,6 +425,8 @@ model Room {
   statusHistories        RoomStatusHistory[]
   residencies            TenantResidency[]
   tenantCodes            TenantRoomCode[]
+  advancePayments        AdvancePayment[]
+  roomContracts          RoomContract[]
 
   @@unique([condoId, roomNo])
   @@index([condoId])
@@ -1485,4 +1491,52 @@ enum CondoSetupStep {
   STEP_7
   STEP_8
   DONE
+}
+
+model AdvancePayment {
+  id      String @id @default(uuid()) @db.Uuid
+  condoId String @db.Uuid
+  roomId  String @db.Uuid
+
+  amount Decimal @db.Decimal(12, 2)
+  note   String?
+
+  createdBy String?  @db.Uuid
+  createdAt DateTime @default(now())
+
+  condo Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  room  Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  creator User? @relation("AdvancePaymentCreatedBy", fields: [createdBy], references: [id])
+
+  @@index([condoId])
+  @@index([roomId])
+  @@index([createdBy])
+}
+
+model RoomContract {
+  id      String @id @default(uuid()) @db.Uuid
+  condoId String @db.Uuid
+  roomId  String @db.Uuid
+
+  tenantName String
+  startDate  DateTime  @db.Date
+  endDate    DateTime? @db.Date
+
+  rentPrice Decimal  @db.Decimal(12, 2)
+  deposit   Decimal? @db.Decimal(12, 2)
+
+  createdBy String?   @db.Uuid
+  createdAt DateTime  @default(now())
+  updatedAt DateTime? @updatedAt
+
+  condo Condo @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  room  Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  creator User? @relation("RoomContractCreatedBy", fields: [createdBy], references: [id])
+
+  @@index([condoId])
+  @@index([roomId])
+  @@index([createdBy])
+  @@index([startDate])
 }
