@@ -829,12 +829,44 @@ router.post("/rooms/:roomId/access-codes", async (req: any, res) => {
     const ownerId = req.user?.id;
     const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
 
-    // จำกัด 5 โค้ด ACTIVE ต่อห้อง (ปรับได้)
-    const activeCount = await prisma.tenantRoomCode.count({
-      where: { roomId: room.id, status: "ACTIVE" },
+  
+    const activeContract = await prisma.rentalContract.findFirst({
+      where: {
+        roomId: room.id,
+        condoId: room.condoId,
+        status: "ACTIVE",
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      select: {
+        id: true,
+        tenantUserId: true,
+        moveInDate: true,
+        moveOutDate: true,
+        status: true,
+      },
     });
+
+    if (!activeContract) {
+      return res.status(400).json({
+        error: "No active contract found for this room",
+      });
+    }
+
+    // จำกัด 5 โค้ด ACTIVE ต่อห้อง (และต่อสัญญาปัจจุบัน)
+    const activeCount = await prisma.tenantRoomCode.count({
+      where: {
+        roomId: room.id,
+        contractId: activeContract.id,
+        status: "ACTIVE",
+      },
+    });
+
     if (activeCount >= 5) {
-      return res.status(400).json({ error: "Max 5 active access codes per room" });
+      return res.status(400).json({
+        error: "Max 5 active access codes per active contract",
+      });
     }
 
     // gen code (6-8 chars) แบบอ่านง่าย
@@ -848,20 +880,29 @@ router.post("/rooms/:roomId/access-codes", async (req: any, res) => {
 
     let code = genCode();
     for (let i = 0; i < 5; i++) {
-      const exists = await prisma.tenantRoomCode.findFirst({ where: { code } }); // code @unique
+      const exists = await prisma.tenantRoomCode.findFirst({
+        where: { code },
+        select: { id: true },
+      });
       if (!exists) break;
       code = genCode();
     }
 
     const daysRaw = Number(req.body?.expiresInDays);
     const expiresInDays =
-      Number.isFinite(daysRaw) && daysRaw > 0 && daysRaw <= 365 ? Math.trunc(daysRaw) : null;
-    const expiresAt = expiresInDays ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000) : null;
+      Number.isFinite(daysRaw) && daysRaw > 0 && daysRaw <= 365
+        ? Math.trunc(daysRaw)
+        : null;
+
+    const expiresAt = expiresInDays
+      ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000)
+      : null;
 
     const created = await prisma.tenantRoomCode.create({
       data: {
         condoId: room.condoId,
         roomId: room.id,
+        contractId: activeContract.id,
         code,
         status: "ACTIVE",
         expiresAt,
@@ -873,14 +914,32 @@ router.post("/rooms/:roomId/access-codes", async (req: any, res) => {
         status: true,
         expiresAt: true,
         createdAt: true,
+        contractId: true,
+        roomId: true,
+        condoId: true,
       },
     });
 
-    return res.status(201).json({ item: created });
+    return res.status(201).json({
+      item: created,
+      contract: {
+        id: activeContract.id,
+        tenantUserId: activeContract.tenantUserId,
+        status: activeContract.status,
+        moveInDate: activeContract.moveInDate,
+        moveOutDate: activeContract.moveOutDate,
+      },
+    });
   } catch (err: any) {
     console.error("CREATE ACCESS CODE ERROR:", err);
-    if (err?.code === "P2002") return res.status(409).json({ error: "Duplicate code, retry" });
-    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+
+    if (err?.code === "P2002") {
+      return res.status(409).json({ error: "Duplicate code, retry" });
+    }
+
+    return res.status(err?.status ?? 500).json({
+      error: err?.message ?? "Failed",
+    });
   }
 });
 
