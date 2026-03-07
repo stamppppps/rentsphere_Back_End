@@ -4,6 +4,9 @@ import dotenv from "dotenv";
 import apiRoutes from "./routes/index.js";
 import "dotenv/config";
 import authRoutes from "./routes/auth.routes.js";
+import dormRoutes from "./routes/dorm.routes.js";
+import repairRoutes from "./routes/repair.routes.js";
+import parcelRoutes from "./routes/parcel.routes.js";
 
 dotenv.config();
 
@@ -40,6 +43,9 @@ app.get("/ping", (_req, res) => {
 // mount api
 app.use("/api/v1", apiRoutes);
 app.use("/auth", authRoutes);
+app.use("/dorm", dormRoutes);
+app.use("/repair", repairRoutes);
+app.use("/parcel", parcelRoutes);
 
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {

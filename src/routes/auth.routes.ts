@@ -113,7 +113,7 @@ router.post("/register", async (req, res) => {
         passwordHash,
         name: body.name?.trim() || null,
         role: "OWNER",
-        
+
         verifyChannel: channel as any,
       },
       select: { id: true, email: true, phone: true, role: true, verifyChannel: true },
@@ -122,7 +122,7 @@ router.post("/register", async (req, res) => {
     //สร้างverify request+ส่งโค้ด
     const code = randomOtp6();
     const codeHash = sha256(code);
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); 
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
     const vr = await prisma.verifyRequest.create({
       data: {
@@ -135,7 +135,7 @@ router.post("/register", async (req, res) => {
       select: { id: true, channel: true, expiresAt: true },
     });
 
-    if (channel === "EMAIL"){
+    if (channel === "EMAIL") {
       await trySend("sendVerifyEmail", () =>
         sendVerifyEmail(cleanEmail, {
           code,
@@ -178,10 +178,10 @@ router.post("/verify/email", async (req, res) => {
 
     await prisma.user.update({
       where: { id: vr.userId },
-      data: { emailVerifiedAt: new Date() }, 
+      data: { emailVerifiedAt: new Date() },
     });
 
-    await prisma.verifyRequest.delete({ where: { id: vr.id } }).catch(() => {});
+    await prisma.verifyRequest.delete({ where: { id: vr.id } }).catch(() => { });
     return res.json({ ok: true });
   } catch (e) {
     console.error(e);
@@ -207,10 +207,10 @@ router.post("/verify/phone", async (req, res) => {
 
     await prisma.user.update({
       where: { id: vr.userId },
-      data: { phoneVerifiedAt: new Date() }, 
+      data: { phoneVerifiedAt: new Date() },
     });
 
-    await prisma.verifyRequest.delete({ where: { id: vr.id } }).catch(() => {});
+    await prisma.verifyRequest.delete({ where: { id: vr.id } }).catch(() => { });
     return res.json({ ok: true });
   } catch (e) {
     console.error(e);
@@ -244,25 +244,25 @@ router.post("/verify/resend", async (req, res) => {
     });
 
     if (vr.channel === "EMAIL") {
-  const toEmail = vr.user.email;          
-  if (!toEmail) return res.status(400).json({ error: "User has no email" });
+      const toEmail = vr.user.email;
+      if (!toEmail) return res.status(400).json({ error: "User has no email" });
 
-  await trySend("sendVerifyEmail", () =>
-    sendVerifyEmail(toEmail, {
-      code,
-      verifyUrl: `${appUrl()}/auth/owner/verify-email?requestId=${vr.id}`,
-    })
-  );
+      await trySend("sendVerifyEmail", () =>
+        sendVerifyEmail(toEmail, {
+          code,
+          verifyUrl: `${appUrl()}/auth/owner/verify-email?requestId=${vr.id}`,
+        })
+      );
 
-  console.log("Email code (dev):", code, "for", toEmail);
-} else {
-  const toPhone = vr.user.phone;          
-  if (!toPhone) return res.status(400).json({ error: "User has no phone" });
+      console.log("Email code (dev):", code, "for", toEmail);
+    } else {
+      const toPhone = vr.user.phone;
+      if (!toPhone) return res.status(400).json({ error: "User has no phone" });
 
-  await trySend("sendVerifySms", () => sendVerifySms(toPhone, code));
+      await trySend("sendVerifySms", () => sendVerifySms(toPhone, code));
 
-  console.log("SMS OTP (dev):", code, "for", toPhone);
-}
+      console.log("SMS OTP (dev):", code, "for", toPhone);
+    }
 
     return res.json({ ok: true, expiresAt });
   } catch (e) {
@@ -301,7 +301,7 @@ router.post("/login", async (req, res) => {
 
     if (!user || !user.passwordHash) return res.status(401).json({ error: "Invalid credentials" });
 
-  
+
     if ((user as any).isActive === false) {
       return res.status(403).json({ error: "Account is inactive" });
     }
@@ -309,7 +309,7 @@ router.post("/login", async (req, res) => {
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ error: "Invalid credentials" });
 
-   
+
     const need = (user as any).verifyChannel as VerifyChannel;
     const verified =
       need === "EMAIL" ? !!(user as any).emailVerifiedAt : !!(user as any).phoneVerifiedAt;
@@ -318,7 +318,7 @@ router.post("/login", async (req, res) => {
       return res.status(403).json({ error: `Please verify your ${need.toLowerCase()} first` });
     }
 
-   
+
     let staffMemberships: any[] | undefined = undefined;
     if (user.role === "STAFF") {
       const memberships = await prisma.staffMembership.findMany({
@@ -372,7 +372,7 @@ router.post("/password/forgot", async (req, res) => {
 
     if (!user) return res.json({ ok: true });
 
-   
+
     if (ch === "EMAIL" && !user.email) return res.json({ ok: true });
     if (ch === "PHONE" && !user.phone) return res.json({ ok: true });
 
@@ -380,7 +380,7 @@ router.post("/password/forgot", async (req, res) => {
     const codeHash = sha256(code);
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    await prisma.passwordResetRequest.deleteMany({ where: { userId: user.id } }).catch(() => {});
+    await prisma.passwordResetRequest.deleteMany({ where: { userId: user.id } }).catch(() => { });
 
     const pr = await prisma.passwordResetRequest.create({
       data: {
@@ -393,7 +393,7 @@ router.post("/password/forgot", async (req, res) => {
     });
 
     if (ch === "EMAIL") {
-      const to = user.email as string; 
+      const to = user.email as string;
       await trySend("sendVerifyEmail", () =>
         sendVerifyEmail(to, {
           code,
@@ -496,8 +496,134 @@ router.get("/me", authRequired, async (req, res) => {
 });
 
 
-router.post("/logout",(_req, res)=>{
+router.post("/logout", (_req, res) => {
   return res.json({ ok: true });
+});
+
+/* =========================================================
+   LINE OAuth Login
+   GET /auth/line/login → redirect ไป LINE OAuth
+   GET /auth/line/callback → รับ code จาก LINE, แลก token, redirect กลับ frontend
+   ========================================================= */
+
+router.get("/line/login", (_req, res) => {
+  const channelId = process.env.LINE_LOGIN_CLIENT_ID;
+  if (!channelId) {
+    return res.status(500).json({ error: "LINE_LOGIN_CLIENT_ID not configured" });
+  }
+
+  const baseUrl = (process.env.API_URL || "http://localhost:3000").replace(/\/+$/, "");
+  const callbackUrl = `${baseUrl}/auth/line/callback`;
+  const state = Math.random().toString(36).substring(2, 15);
+
+  const lineAuthUrl =
+    `https://access.line.me/oauth2/v2.1/authorize` +
+    `?response_type=code` +
+    `&client_id=${channelId}` +
+    `&redirect_uri=${encodeURIComponent(callbackUrl)}` +
+    `&state=${state}` +
+    `&scope=profile%20openid`;
+
+  return res.redirect(lineAuthUrl);
+});
+
+router.get("/line/callback", async (req, res) => {
+  try {
+    const { code } = req.query as { code?: string };
+    if (!code) {
+      return res.status(400).send("Missing authorization code from LINE");
+    }
+
+    const channelId = process.env.LINE_LOGIN_CLIENT_ID;
+    const channelSecret = process.env.LINE_LOGIN_CLIENT_SECRET;
+    if (!channelId || !channelSecret) {
+      return res.status(500).send("LINE_LOGIN_CLIENT_ID or LINE_LOGIN_CLIENT_SECRET not configured");
+    }
+
+    const baseUrl = (process.env.API_URL || "http://localhost:3000").replace(/\/+$/, "");
+    const callbackUrl = `${baseUrl}/auth/line/callback`;
+
+    // 1) Exchange code for access token
+    const tokenRes = await fetch("https://api.line.me/oauth2/v2.1/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: callbackUrl,
+        client_id: channelId,
+        client_secret: channelSecret,
+      }),
+    });
+    const tokenData = (await tokenRes.json()) as any;
+
+    if (!tokenRes.ok || !tokenData.access_token) {
+      console.error("LINE token exchange failed:", JSON.stringify(tokenData, null, 2));
+      console.error("callbackUrl used:", callbackUrl);
+      console.error("channelId:", channelId);
+      return res.status(400).send("LINE token exchange failed: " + (tokenData?.error_description || tokenData?.error || "unknown"));
+    }
+
+    // 2) Get user profile
+    const profileRes = await fetch("https://api.line.me/v2/profile", {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+    const profile = (await profileRes.json()) as any;
+    const lineUserId = profile.userId;
+
+    if (!lineUserId) {
+      return res.status(400).send("Could not get LINE userId");
+    }
+
+    // 3) Upsert LineAccount in DB
+    const existing = await prisma.lineAccount.findUnique({
+      where: { lineUserId },
+      select: { id: true, userId: true },
+    });
+
+    if (!existing) {
+      // Create a new TENANT user + LineAccount
+      const newUser = await prisma.user.create({
+        data: {
+          role: "TENANT",
+          name: profile.displayName || "LINE User",
+          isActive: true,
+          verifyChannel: "PHONE",
+        },
+        select: { id: true },
+      });
+
+      await prisma.lineAccount.create({
+        data: {
+          userId: newUser.id,
+          lineUserId,
+          displayName: profile.displayName || null,
+          pictureUrl: profile.pictureUrl || null,
+          isActive: true,
+        },
+      });
+    } else {
+      // Update display name/picture
+      await prisma.lineAccount.update({
+        where: { lineUserId },
+        data: {
+          displayName: profile.displayName || undefined,
+          pictureUrl: profile.pictureUrl || undefined,
+          isActive: true,
+          linkedAt: new Date(),
+        },
+      });
+    }
+
+    // 4) Redirect to frontend with lineUserId
+    const frontendUrl = process.env.APP_URL || "http://localhost:5174";
+    return res.redirect(
+      `${frontendUrl}/owner/line-login-success?lineUserId=${encodeURIComponent(lineUserId)}`
+    );
+  } catch (err: any) {
+    console.error("LINE callback error:", err);
+    return res.status(500).send("LINE login failed: " + (err?.message || "unknown"));
+  }
 });
 
 export default router;

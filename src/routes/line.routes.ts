@@ -49,6 +49,88 @@ function normalizeCode(text: string) {
 }
 
 /* =========================================================
+   SlipOK Helper
+   ========================================================= */
+async function verifySlipWithSlipOK(imageBuffer: Buffer): Promise<{
+  success: boolean;
+  data?: any;
+  error?: string;
+}> {
+  const apiKey = process.env.SLIPOK_API_KEY;
+  const branchId = process.env.SLIPOK_BRANCH_ID;
+
+  if (!apiKey || !branchId) {
+    return { success: false, error: "SlipOK ไม่ได้ตั้งค่า" };
+  }
+
+  try {
+    const formData = new FormData();
+    const blob = new Blob([new Uint8Array(imageBuffer)], { type: "image/jpeg" });
+    formData.append("files", blob, "slip.jpg");
+
+    const res = await fetch(`https://api.slipok.com/api/line/apikey/${branchId}`, {
+      method: "POST",
+      headers: {
+        "x-authorization": apiKey,
+      },
+      body: formData,
+    });
+
+    const json = await res.json();
+    console.log("SlipOK FULL response:", JSON.stringify(json, null, 2));
+
+    // Extract data from various response shapes
+    const d = json?.data?.data || json?.data || json;
+
+    // Check if there is any transaction data at all — if yes, the slip is valid
+    const hasTransactionData = d && (
+      d.transRef || d.amount || d.transAmount ||
+      d.sender?.name || d.receiver?.name ||
+      d.sendingBank || d.receivingBank
+    );
+
+    if (hasTransactionData) {
+      console.log("SlipOK: slip has valid transaction data — accepting");
+      return { success: true, data: d };
+    }
+
+    // Fallback: check explicit success flags
+    if (json?.data?.success || json?.success) {
+      return { success: true, data: json.data || json };
+    }
+
+    const errMsg = json?.data?.message || json?.message || "ตรวจ slip ไม่สำเร็จ";
+    console.log("SlipOK: no transaction data found, error:", errMsg);
+    return { success: false, data: json, error: errMsg };
+  } catch (err: any) {
+    console.error("SlipOK error:", err);
+    return { success: false, error: err?.message || "SlipOK error" };
+  }
+}
+
+async function downloadLineImage(messageId: string): Promise<Buffer | null> {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN || process.env.LINE_MESSAGING_ACCESS_TOKEN;
+  if (!token) return null;
+
+  try {
+    const res = await fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      console.error("LINE download image error:", res.status);
+      return null;
+    }
+
+    const arrayBuffer = await res.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } catch (err) {
+    console.error("LINE download error:", err);
+    return null;
+  }
+}
+
+/* =========================================================
    POST /api/v1/line/webhook
    ========================================================= */
 router.post("/webhook", async (req: any, res) => {
@@ -57,8 +139,8 @@ router.post("/webhook", async (req: any, res) => {
       typeof req.rawBody === "string"
         ? req.rawBody
         : Buffer.isBuffer(req.rawBody)
-        ? req.rawBody.toString("utf8")
-        : JSON.stringify(req.body ?? {});
+          ? req.rawBody.toString("utf8")
+          : JSON.stringify(req.body ?? {});
 
     const signature = req.header("x-line-signature");
     const body = req.body ?? {};
@@ -74,13 +156,151 @@ router.post("/webhook", async (req: any, res) => {
     for (const event of events) {
       try {
         if (event.type !== "message") continue;
-        if (event.message?.type !== "text") continue;
 
         const replyToken = event.replyToken;
         const lineUserId = event.source?.userId;
-        const text = String(event.message?.text ?? "").trim();
 
-        if (!replyToken || !lineUserId || !text) continue;
+        if (!replyToken || !lineUserId) continue;
+
+        /* ============================================
+           Handle IMAGE messages (slip verification)
+           ============================================ */
+        if (event.message?.type === "image") {
+          console.log("=== SLIP VERIFICATION START ===");
+          console.log("LINE incoming image from:", lineUserId, "messageId:", event.message.id);
+
+          try {
+            // Find user from LINE account
+            const lineAcc = await prisma.lineAccount.findUnique({
+              where: { lineUserId },
+              select: { userId: true },
+            });
+            console.log("Step 1 - lineAcc:", lineAcc ? `found userId=${lineAcc.userId}` : "NOT FOUND");
+
+            if (!lineAcc?.userId) {
+              await replyMessage(replyToken, [
+                { type: "text", text: "กรุณาเชื่อมบัญชีก่อนส่ง slip ค่ะ" },
+              ]);
+              continue;
+            }
+
+            // Find that user's residency to get condoId + roomId
+            const residency = await prisma.tenantResidency.findFirst({
+              where: { tenantUserId: lineAcc.userId, status: "ACTIVE" },
+              select: { condoId: true, roomId: true },
+            });
+            console.log("Step 2 - residency:", residency ? `condoId=${residency.condoId}, roomId=${residency.roomId}` : "NOT FOUND");
+
+            if (!residency) {
+              await replyMessage(replyToken, [
+                { type: "text", text: "ไม่พบข้อมูลการเช่าของคุณ" },
+              ]);
+              continue;
+            }
+
+            // Find latest unpaid invoice for this room
+            const invoice = await prisma.invoice.findFirst({
+              where: {
+                condoId: residency.condoId,
+                roomId: residency.roomId,
+                status: { not: "PAID" },
+              },
+              orderBy: { createdAt: "desc" },
+              select: {
+                id: true,
+                invoiceNo: true,
+                totalAmount: true,
+                room: { select: { roomNo: true } },
+              },
+            });
+            console.log("Step 3 - invoice:", invoice ? `id=${invoice.id}, invoiceNo=${invoice.invoiceNo}, amount=${invoice.totalAmount}` : "NOT FOUND (all paid?)");
+
+            if (!invoice) {
+              await replyMessage(replyToken, [
+                { type: "text", text: "✅ ไม่พบใบแจ้งหนี้ที่ค้างชำระ\nหากเพิ่งโอนเงิน กรุณารอสักครู่ค่ะ" },
+              ]);
+              continue;
+            }
+
+            // Download image from LINE
+            console.log("Step 4 - downloading image from LINE...");
+            const imageBuffer = await downloadLineImage(event.message.id);
+            console.log("Step 4 - image download:", imageBuffer ? `OK (${imageBuffer.length} bytes)` : "FAILED");
+
+            if (!imageBuffer) {
+              await replyMessage(replyToken, [
+                { type: "text", text: "ไม่สามารถดาวน์โหลดรูปได้ กรุณาลองส่งอีกครั้งค่ะ" },
+              ]);
+              continue;
+            }
+
+            // Verify with SlipOK
+            console.log("Step 5 - calling SlipOK...");
+            const slipResult = await verifySlipWithSlipOK(imageBuffer);
+            console.log("Step 5 - SlipOK result:", JSON.stringify(slipResult));
+
+            if (slipResult.success) {
+              // Update invoice to PAID
+              await prisma.invoice.update({
+                where: { id: invoice.id },
+                data: { status: "PAID" as any },
+              });
+              console.log("Step 6 - invoice updated to PAID");
+
+              const amountStr = `฿${Number(invoice.totalAmount).toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
+              const transferAmount = slipResult.data?.amount || slipResult.data?.transAmount || "";
+              const transferFrom = slipResult.data?.sender?.name || slipResult.data?.sendingBank || "";
+
+              await replyMessage(replyToken, [
+                {
+                  type: "text",
+                  text:
+                    `✅ ตรวจสอบ slip สำเร็จ!\n` +
+                    `━━━━━━━━━━━━━━━\n` +
+                    `📋 ใบแจ้งหนี้: ${invoice.invoiceNo}\n` +
+                    `🚪 ห้อง: ${invoice.room?.roomNo ?? "-"}\n` +
+                    `💰 ยอด: ${amountStr}\n` +
+                    (transferAmount ? `💵 โอน: ฿${Number(transferAmount).toLocaleString()}\n` : "") +
+                    (transferFrom ? `🏦 จาก: ${transferFrom}\n` : "") +
+                    `━━━━━━━━━━━━━━━\n` +
+                    `📌 สถานะ: ✅ ชำระแล้ว\n\n` +
+                    `ขอบคุณค่ะ 🙏`,
+                },
+              ]);
+              console.log("=== SLIP VERIFICATION COMPLETE - PAID ===");
+            } else {
+              await replyMessage(replyToken, [
+                {
+                  type: "text",
+                  text:
+                    `❌ ตรวจ slip ไม่สำเร็จ\n` +
+                    (slipResult.error ? `📝 ${slipResult.error}\n` : "") +
+                    `\nกรุณาส่งรูป slip ที่ชัดเจนอีกครั้ง`,
+                },
+              ]);
+              console.log("=== SLIP VERIFICATION COMPLETE - FAILED ===");
+            }
+          } catch (slipErr: any) {
+            console.error("=== SLIP VERIFICATION CRASH ===", slipErr);
+            try {
+              await replyMessage(replyToken, [
+                { type: "text", text: `❌ เกิดข้อผิดพลาดในการตรวจ slip\n${slipErr?.message || "unknown error"}` },
+              ]);
+            } catch (replyErr) {
+              console.error("Failed to send error reply:", replyErr);
+            }
+          }
+
+          continue;
+        }
+
+        /* ============================================
+           Handle TEXT messages (room code linking)
+           ============================================ */
+        if (event.message?.type !== "text") continue;
+
+        const text = String(event.message?.text ?? "").trim();
+        if (!text) continue;
 
         console.log("LINE incoming text:", text, "from:", lineUserId);
 
