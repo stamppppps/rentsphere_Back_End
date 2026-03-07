@@ -1,3 +1,4 @@
+// owner.routes.ts
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import bcrypt from "bcrypt";
@@ -13,8 +14,9 @@ const router = Router();
 
 router.use(authRequired, requireRole(["OWNER"]));
 
-
-
+/* =========================
+   Permission helpers
+   ========================= */
 const DEFAULT_PERMISSION_MODULES = [
   "DASHBOARD",
   "ROOMS",
@@ -51,12 +53,10 @@ async function ensurePermissionCatalog(modules: PermissionModuleStr[]) {
 async function assertOwnerCondoOrThrow(ownerId: string, condoId: string) {
   const condo = await prisma.condo.findFirst({
     where: { id: condoId, ownerUserId: ownerId },
-    select: { id: true, nameTh: true }, 
+    select: { id: true, nameTh: true },
   });
   if (!condo) {
     const err: any = new Error("Forbidden (not your condo)");
-    
-
     err.status = 403;
     throw err;
   }
@@ -92,12 +92,15 @@ async function replaceMembershipOverrides(membershipId: string, modules: Permiss
         membershipId,
         allowed: true,
       }))
-      .filter((x): x is { permissionId: string; membershipId: string; allowed: boolean } => Boolean(x.permissionId)),
+      .filter(
+        (x): x is { permissionId: string; membershipId: string; allowed: boolean } =>
+          Boolean(x.permissionId)
+      ),
   });
 }
 
 router.get("/me", async (req, res) => {
-  res.json({ message: "OWNER OK", user: req.user });
+  res.json({ message: "OWNER OK", user: (req as any).user });
 });
 
 /* =========================
@@ -105,21 +108,18 @@ router.get("/me", async (req, res) => {
    ========================= */
 const BANK_NAME_MAP: Record<string, string> = {
   PROMPTPAY: "พร้อมเพย์ (PromptPay)",
-
   BBL: "ธนาคารกรุงเทพ (Bangkok Bank)",
   KBANK: "ธนาคารกสิกรไทย (Kasikorn Bank)",
   SCB: "ธนาคารไทยพาณิชย์ (SCB)",
   KTB: "ธนาคารกรุงไทย (Krungthai Bank)",
   BAY: "ธนาคารกรุงศรีอยุธยา (Krungsri Bank)",
   TTB: "ธนาคารทหารไทยธนชาต (TTB)",
-
   CIMB: "ธนาคารซีไอเอ็มบีไทย (CIMB Thai)",
   UOB: "ธนาคารยูโอบี (UOB)",
   KKP: "ธนาคารเกียรตินาคินภัทร (KKP)",
   TISCO: "ธนาคารทิสโก้ (TISCO)",
   LH: "ธนาคารแลนด์ แอนด์ เฮ้าส์ (LH Bank)",
   ICBC: "ธนาคารไอซีบีซี (ICBC Thai)",
-
   BAAC: "ธนาคารเพื่อการเกษตรและสหกรณ์การเกษตร (ธ.ก.ส.)",
   GSB: "ธนาคารออมสิน (GSB)",
   GHB: "ธนาคารอาคารสงเคราะห์ (GHB)",
@@ -183,19 +183,62 @@ async function assertOwnerCondo(ownerId: string, condoId: string) {
 }
 
 /* =========================
+   Guard: check owner owns room (via condo)
+   ========================= */
+async function assertOwnerRoomOrThrow(req: any, roomId: string) {
+  const ownerId = req.user?.id;
+  if (!ownerId) {
+    const err: any = new Error("Unauthorized");
+    err.status = 401;
+    throw err;
+  }
+
+  const room = await prisma.room.findFirst({
+    where: { id: roomId, condo: { ownerUserId: ownerId } },
+    select: { id: true, condoId: true, roomNo: true, floor: true },
+  });
+
+  if (!room) {
+    const err: any = new Error("Forbidden (not your room)");
+    err.status = 403;
+    throw err;
+  }
+  return room;
+}
+
+function startOfMonth(d = new Date()) {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+async function getOrCreateCurrentCycle(condoId: string, openedBy?: string | null) {
+  const cycleMonth = startOfMonth(new Date());
+
+  const cycle = await prisma.meterCycle.upsert({
+    where: { condoId_cycleMonth: { condoId, cycleMonth } },
+    update: {},
+    create: {
+      condoId,
+      cycleMonth,
+      status: "OPEN",
+      openedBy: openedBy ?? null,
+    },
+  });
+
+  return cycle;
+}
+
+/* =========================
    POST /owner/condos/:condoId/logo
    ========================= */
 router.post("/condos/:condoId/logo", uploadMemory.single("logo"), async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
 
     const condo = await assertOwnerCondo(ownerId, condoId);
     if (!condo) return res.status(403).json({ error: "Forbidden (not your condo)" });
-
-   
 
     if (!req.file) return res.status(400).json({ error: "Missing file field 'logo'" });
     const file = req.file;
@@ -251,7 +294,7 @@ router.post("/condos/:condoId/logo", uploadMemory.single("logo"), async (req, re
    ========================= */
 router.post("/condos", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const body = req.body ?? {};
@@ -354,7 +397,7 @@ router.post("/condos", async (req, res) => {
    ========================= */
 router.get("/condos", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condos = await prisma.condo.findMany({
@@ -378,7 +421,7 @@ router.get("/condos", async (req, res) => {
    ========================= */
 router.get("/condos/:condoId", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -397,12 +440,72 @@ router.get("/condos/:condoId", async (req, res) => {
   }
 });
 
+// =========================
+// GET /owner/condos/:condoId/dashboard
+// =========================
+router.get("/condos/:condoId/dashboard", async (req, res) => {
+  try {
+    const ownerId = (req as any).user?.id;
+    if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
+
+    const condoId = String(req.params.condoId);
+
+    const condo = await prisma.condo.findFirst({
+      where: { id: condoId, ownerUserId: ownerId },
+      select: {
+        id: true,
+        nameTh: true,
+        nameEn: true,
+        rooms: {
+          select: {
+            id: true,
+            isActive: true,
+            occupancyStatus: true,
+            rentPrice: true,
+          },
+        },
+      },
+    });
+
+    if (!condo) return res.status(404).json({ error: "Condo not found" });
+
+    const rooms = condo.rooms ?? [];
+
+    const roomsTotal = rooms.length;
+    const roomsActive = rooms.filter((r) => r.isActive).length;
+
+    const occupiedRooms = rooms.filter((r) => r.isActive && r.occupancyStatus === "OCCUPIED").length;
+    const vacantRooms = rooms.filter((r) => r.isActive && r.occupancyStatus === "VACANT").length;
+
+    const activeRoomsForAvg = rooms.filter((r) => r.isActive);
+    const avgRentPrice =
+      activeRoomsForAvg.length === 0
+        ? 0
+        : Math.round(activeRoomsForAvg.reduce((sum, r) => sum + Number(r.rentPrice ?? 0), 0) / activeRoomsForAvg.length);
+
+    return res.json({
+      summary: {
+        condoId: condo.id,
+        condoName: condo.nameTh ?? condo.nameEn ?? "—",
+        roomsTotal,
+        roomsActive,
+        occupiedRooms,
+        vacantRooms,
+        avgRentPrice,
+      },
+    });
+  } catch (err: any) {
+    console.error("GET DASHBOARD ERROR:", err);
+    return res.status(500).json({ error: "Failed to fetch dashboard" });
+  }
+});
+
 /* =========================
    (Step4) Floor/Room config
    ========================= */
 router.get("/condos/:condoId/floor-config", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -431,7 +534,7 @@ router.get("/condos/:condoId/floor-config", async (req, res) => {
 
 router.put("/condos/:condoId/floor-config", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -492,9 +595,356 @@ router.put("/condos/:condoId/floor-config", async (req, res) => {
   }
 });
 
+/* =========================================================
+   ✅ Meter Numbers (RoomMeter)  +  Meter Reading (Monthly)
+   ========================================================= */
+
+// GET /owner/rooms/:roomId/meter-numbers
+router.get("/rooms/:roomId/meter-numbers", async (req, res) => {
+  try {
+    const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+
+    const meter = await prisma.roomMeter.findUnique({
+      where: { roomId: room.id },
+      select: { waterMeterNo: true, electricMeterNo: true },
+    });
+
+    return res.json(meter ?? { waterMeterNo: null, electricMeterNo: null });
+  } catch (err: any) {
+    console.error("GET METER NUMBERS ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+// PUT /owner/rooms/:roomId/meter-numbers
+router.put("/rooms/:roomId/meter-numbers", async (req, res) => {
+  try {
+    const ownerId = (req as any).user?.id;
+    const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+
+    const waterMeterNo = typeof req.body?.waterMeterNo === "string" ? req.body.waterMeterNo.trim() : null;
+    const electricMeterNo = typeof req.body?.electricMeterNo === "string" ? req.body.electricMeterNo.trim() : null;
+
+    const saved = await prisma.roomMeter.upsert({
+      where: { roomId: room.id },
+      update: { waterMeterNo, electricMeterNo },
+      create: { roomId: room.id, waterMeterNo, electricMeterNo },
+    });
+
+    // optional: log history (ถ้าอยาก) -> ข้ามไว้
+    return res.json({ ok: true, ...saved, updatedBy: ownerId ?? null });
+  } catch (err: any) {
+    console.error("SAVE METER NUMBERS ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+// GET /owner/rooms/:roomId/meters  (เดือนปัจจุบัน)
+router.get("/rooms/:roomId/meters", async (req: any, res) => {
+  try {
+    const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+    const cycleMonth = startOfMonth(new Date());
+
+    const cycle = await prisma.meterCycle.findUnique({
+      where: { condoId_cycleMonth: { condoId: room.condoId, cycleMonth } },
+      select: { id: true, cycleMonth: true, status: true },
+    });
+
+    if (!cycle) {
+      return res.json({
+        roomId: room.id,
+        condoId: room.condoId,
+        cycle: null,
+        prevWater: null,
+        currWater: null,
+        prevElectric: null,
+        currElectric: null,
+        waterUnits: null,
+        electricUnits: null,
+        status: null,
+      });
+    }
+
+    const reading = await prisma.meterReading.findUnique({
+      where: { roomId_cycleId: { roomId: room.id, cycleId: cycle.id } },
+      select: {
+        prevWater: true,
+        currWater: true,
+        prevElectric: true,
+        currElectric: true,
+        waterUnits: true,
+        electricUnits: true,
+        status: true,
+        recordedAt: true,
+        note: true,
+      },
+    });
+
+    return res.json({
+      roomId: room.id,
+      condoId: room.condoId,
+      cycle,
+      prevWater: reading?.prevWater ? Number(reading.prevWater) : null,
+      currWater: reading?.currWater ? Number(reading.currWater) : null,
+      prevElectric: reading?.prevElectric ? Number(reading.prevElectric) : null,
+      currElectric: reading?.currElectric ? Number(reading.currElectric) : null,
+      waterUnits: reading?.waterUnits ? Number(reading.waterUnits) : null,
+      electricUnits: reading?.electricUnits ? Number(reading.electricUnits) : null,
+      status: reading?.status ?? null,
+      recordedAt: reading?.recordedAt ?? null,
+      note: reading?.note ?? null,
+    });
+  } catch (err: any) {
+    console.error("GET METERS ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+// POST /owner/rooms/:roomId/meters  (บันทึกเดือนปัจจุบัน)
+// body: { currWater: number, currElectric: number, note?: string }
+router.post("/rooms/:roomId/meters", async (req: any, res) => {
+  try {
+    const ownerId = req.user?.id;
+    const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+
+    const currWaterNum = Number(req.body?.currWater);
+    const currElecNum = Number(req.body?.currElectric);
+    const note = typeof req.body?.note === "string" ? req.body.note.trim() : null;
+
+    if (!Number.isFinite(currWaterNum) || currWaterNum < 0) {
+      return res.status(400).json({ message: "currWater must be number >= 0" });
+    }
+    if (!Number.isFinite(currElecNum) || currElecNum < 0) {
+      return res.status(400).json({ message: "currElectric must be number >= 0" });
+    }
+
+    const cycle = await getOrCreateCurrentCycle(room.condoId, ownerId ?? null);
+
+    const prevCycle = await prisma.meterCycle.findFirst({
+      where: { condoId: room.condoId, cycleMonth: { lt: cycle.cycleMonth } },
+      orderBy: { cycleMonth: "desc" },
+      select: { id: true },
+    });
+
+    let prevWater = 0;
+    let prevElectric = 0;
+
+    if (prevCycle) {
+      const prevReading = await prisma.meterReading.findUnique({
+        where: { roomId_cycleId: { roomId: room.id, cycleId: prevCycle.id } },
+        select: { currWater: true, currElectric: true },
+      });
+      prevWater = prevReading?.currWater ? Number(prevReading.currWater) : 0;
+      prevElectric = prevReading?.currElectric ? Number(prevReading.currElectric) : 0;
+    }
+
+    const waterUnits = Math.max(0, currWaterNum - prevWater);
+    const electricUnits = Math.max(0, currElecNum - prevElectric);
+
+    const saved = await prisma.meterReading.upsert({
+      where: { roomId_cycleId: { roomId: room.id, cycleId: cycle.id } },
+      update: {
+        prevWater: new Prisma.Decimal(String(prevWater)),
+        currWater: new Prisma.Decimal(String(currWaterNum)),
+        prevElectric: new Prisma.Decimal(String(prevElectric)),
+        currElectric: new Prisma.Decimal(String(currElecNum)),
+        waterUnits: new Prisma.Decimal(String(waterUnits)),
+        electricUnits: new Prisma.Decimal(String(electricUnits)),
+        status: "SUBMITTED",
+        recordedAt: new Date(),
+        recordedBy: ownerId ?? null,
+        note: note ?? undefined,
+      },
+      create: {
+        condoId: room.condoId,
+        roomId: room.id,
+        cycleId: cycle.id,
+        prevWater: new Prisma.Decimal(String(prevWater)),
+        currWater: new Prisma.Decimal(String(currWaterNum)),
+        prevElectric: new Prisma.Decimal(String(prevElectric)),
+        currElectric: new Prisma.Decimal(String(currElecNum)),
+        waterUnits: new Prisma.Decimal(String(waterUnits)),
+        electricUnits: new Prisma.Decimal(String(electricUnits)),
+        status: "SUBMITTED",
+        recordedAt: new Date(),
+        recordedBy: ownerId ?? null,
+        note: note ?? null,
+      },
+    });
+
+    return res.json({
+      ok: true,
+      cycle,
+      reading: {
+        prevWater: Number(saved.prevWater ?? 0),
+        currWater: Number(saved.currWater ?? 0),
+        prevElectric: Number(saved.prevElectric ?? 0),
+        currElectric: Number(saved.currElectric ?? 0),
+        waterUnits: Number(saved.waterUnits ?? 0),
+        electricUnits: Number(saved.electricUnits ?? 0),
+        status: saved.status,
+        recordedAt: saved.recordedAt,
+      },
+    });
+  } catch (err: any) {
+    console.error("SAVE METERS ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+/* =========================
+   ✅ Tenant Room Code (Access Codes)
+   ========================= */
+
+// GET /owner/rooms/:roomId/access-codes
+router.get("/rooms/:roomId/access-codes", async (req: any, res) => {
+  try {
+    const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+
+    const items = await prisma.tenantRoomCode.findMany({
+      where: { roomId: room.id },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        code: true,
+        status: true,
+        expiresAt: true,
+        usedAt: true,
+        createdAt: true,
+        createdBy: true,
+      },
+    });
+
+    return res.json({ items });
+  } catch (err: any) {
+    console.error("LIST ACCESS CODES ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+// POST /owner/rooms/:roomId/access-codes
+// body: { expiresInDays?: number }
+router.post("/rooms/:roomId/access-codes", async (req: any, res) => {
+  try {
+    const ownerId = req.user?.id;
+    const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+
+  
+    const activeContract = await prisma.rentalContract.findFirst({
+      where: {
+        roomId: room.id,
+        condoId: room.condoId,
+        status: "ACTIVE",
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      select: {
+        id: true,
+        tenantUserId: true,
+        moveInDate: true,
+        moveOutDate: true,
+        status: true,
+      },
+    });
+
+    if (!activeContract) {
+      return res.status(400).json({
+        error: "No active contract found for this room",
+      });
+    }
+
+    // จำกัด 5 โค้ด ACTIVE ต่อห้อง (และต่อสัญญาปัจจุบัน)
+    const activeCount = await prisma.tenantRoomCode.count({
+      where: {
+        roomId: room.id,
+        contractId: activeContract.id,
+        status: "ACTIVE",
+      },
+    });
+
+    if (activeCount >= 5) {
+      return res.status(400).json({
+        error: "Max 5 active access codes per active contract",
+      });
+    }
+
+    // gen code (6-8 chars) แบบอ่านง่าย
+    const genCode = () =>
+      crypto
+        .randomBytes(6)
+        .toString("base64url")
+        .replace(/[-_]/g, "")
+        .slice(0, 8)
+        .toUpperCase();
+
+    let code = genCode();
+    for (let i = 0; i < 5; i++) {
+      const exists = await prisma.tenantRoomCode.findFirst({
+        where: { code },
+        select: { id: true },
+      });
+      if (!exists) break;
+      code = genCode();
+    }
+
+    const daysRaw = Number(req.body?.expiresInDays);
+    const expiresInDays =
+      Number.isFinite(daysRaw) && daysRaw > 0 && daysRaw <= 365
+        ? Math.trunc(daysRaw)
+        : null;
+
+    const expiresAt = expiresInDays
+      ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000)
+      : null;
+
+    const created = await prisma.tenantRoomCode.create({
+      data: {
+        condoId: room.condoId,
+        roomId: room.id,
+        contractId: activeContract.id,
+        code,
+        status: "ACTIVE",
+        expiresAt,
+        createdBy: ownerId ?? null,
+      },
+      select: {
+        id: true,
+        code: true,
+        status: true,
+        expiresAt: true,
+        createdAt: true,
+        contractId: true,
+        roomId: true,
+        condoId: true,
+      },
+    });
+
+    return res.status(201).json({
+      item: created,
+      contract: {
+        id: activeContract.id,
+        tenantUserId: activeContract.tenantUserId,
+        status: activeContract.status,
+        moveInDate: activeContract.moveInDate,
+        moveOutDate: activeContract.moveOutDate,
+      },
+    });
+  } catch (err: any) {
+    console.error("CREATE ACCESS CODE ERROR:", err);
+
+    if (err?.code === "P2002") {
+      return res.status(409).json({ error: "Duplicate code, retry" });
+    }
+
+    return res.status(err?.status ?? 500).json({
+      error: err?.message ?? "Failed",
+    });
+  }
+});
+
 /* =========================
    Rooms (Step5/6/7/8)
-   “เฉพาะ route แบบเฉพาะเจาะจง” ต้องอยู่ก่อน /:roomId
    ========================= */
 
 /* =========================
@@ -502,7 +952,7 @@ router.put("/condos/:condoId/floor-config", async (req, res) => {
    ========================= */
 router.patch("/condos/:condoId/rooms/bulk-price", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -522,7 +972,6 @@ router.patch("/condos/:condoId/rooms/bulk-price", async (req, res) => {
 
     const roomIds = roomIdsRaw.map((x: any) => String(x)).filter(Boolean);
 
-    // price: number | null  (null => 0)
     let priceNum = 0;
     if (!(priceRaw === null || priceRaw === undefined || String(priceRaw).trim() === "")) {
       const cleaned = String(priceRaw).replace(/,/g, "").trim();
@@ -550,7 +999,7 @@ router.patch("/condos/:condoId/rooms/bulk-price", async (req, res) => {
    ========================= */
 router.patch("/condos/:condoId/rooms/bulk-occupancy", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -590,12 +1039,10 @@ router.patch("/condos/:condoId/rooms/bulk-occupancy", async (req, res) => {
 /* =========================
    (Step8 - NEW) Multi-service
    PUT /owner/condos/:condoId/room-services/assign-bulk
-   body: { roomIds: string[], serviceId: string }
-   - เพิ่มบริการให้หลายห้อง (ไม่ลบของเดิม)
    ========================= */
 router.put("/condos/:condoId/room-services/assign-bulk", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -615,7 +1062,6 @@ router.put("/condos/:condoId/room-services/assign-bulk", async (req, res) => {
     const serviceId = typeof serviceIdRaw === "string" ? serviceIdRaw.trim() : "";
     if (!serviceId) return res.status(400).json({ error: "serviceId is required" });
 
-    // กันยิงมั่ว: service ต้องเป็นของ condoId นี้เท่านั้น
     const svc = await prisma.condoService.findFirst({
       where: { id: serviceId, condoId },
       select: { id: true },
@@ -624,7 +1070,6 @@ router.put("/condos/:condoId/room-services/assign-bulk", async (req, res) => {
 
     const roomIds = roomIdsRaw.map((x: any) => String(x)).filter(Boolean);
 
-    // กันยิงข้ามคอนโด: ใช้เฉพาะห้องที่อยู่ใน condoId จริง ๆ
     const validRooms = await prisma.room.findMany({
       where: { condoId, id: { in: roomIds } },
       select: { id: true },
@@ -632,7 +1077,6 @@ router.put("/condos/:condoId/room-services/assign-bulk", async (req, res) => {
     const validRoomIds = validRooms.map((r) => r.id);
     if (validRoomIds.length === 0) return res.json({ ok: true, assigned: 0 });
 
-    // createMany + skipDuplicates กัน @@unique([roomId, serviceId])
     const created = await prisma.roomExtraChargeAssignment.createMany({
       data: validRoomIds.map((roomId) => ({
         roomId,
@@ -652,12 +1096,10 @@ router.put("/condos/:condoId/room-services/assign-bulk", async (req, res) => {
 /* =========================
    (Step8 - NEW) Multi-service
    PUT /owner/condos/:condoId/room-services/remove-bulk
-   body: { roomIds: string[], serviceId: string }
-   - ลบบริการออกจากหลายห้อง
    ========================= */
 router.put("/condos/:condoId/room-services/remove-bulk", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -677,7 +1119,6 @@ router.put("/condos/:condoId/room-services/remove-bulk", async (req, res) => {
     const serviceId = typeof serviceIdRaw === "string" ? serviceIdRaw.trim() : "";
     if (!serviceId) return res.status(400).json({ error: "serviceId is required" });
 
-    // กันยิงข้ามคอนโด: service ต้องอยู่ใน condo เดียวกัน
     const svc = await prisma.condoService.findFirst({
       where: { id: serviceId, condoId },
       select: { id: true },
@@ -686,7 +1127,6 @@ router.put("/condos/:condoId/room-services/remove-bulk", async (req, res) => {
 
     const roomIds = roomIdsRaw.map((x: any) => String(x)).filter(Boolean);
 
-    // valid room ids in this condo
     const validRooms = await prisma.room.findMany({
       where: { condoId, id: { in: roomIds } },
       select: { id: true },
@@ -707,13 +1147,10 @@ router.put("/condos/:condoId/room-services/remove-bulk", async (req, res) => {
 
 /* =========================
    (Step8) PATCH /owner/condos/:condoId/rooms/bulk-service
-   - รองรับ 1 ห้องหลายบริการ
-   - serviceId = string  ➜ เพิ่ม service
-   - serviceId = null    ➜ ลบทุก service ของห้องนั้น
    ========================= */
 router.patch("/condos/:condoId/rooms/bulk-service", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -740,14 +1177,8 @@ router.patch("/condos/:condoId/rooms/bulk-service", async (req, res) => {
       return res.json({ ok: true, updated: 0 });
     }
 
-    // =========================
     // REMOVE ALL SERVICES
-    // =========================
-    if (
-      serviceIdRaw === null ||
-      serviceIdRaw === undefined ||
-      String(serviceIdRaw).trim() === ""
-    ) {
+    if (serviceIdRaw === null || serviceIdRaw === undefined || String(serviceIdRaw).trim() === "") {
       const deleted = await prisma.roomExtraChargeAssignment.deleteMany({
         where: { roomId: { in: validRoomIds } },
       });
@@ -759,9 +1190,7 @@ router.patch("/condos/:condoId/rooms/bulk-service", async (req, res) => {
       });
     }
 
-    // =========================
     // SET SERVICE (replace ทั้งหมดให้เหลือ service เดียว)
-    // =========================
     const serviceId = String(serviceIdRaw).trim();
 
     const svc = await prisma.condoService.findFirst({
@@ -773,7 +1202,6 @@ router.patch("/condos/:condoId/rooms/bulk-service", async (req, res) => {
       return res.status(400).json({ error: "Invalid serviceId (not in this condo)" });
     }
 
-    // 🔥 ลบของเดิมก่อน
     await prisma.roomExtraChargeAssignment.deleteMany({
       where: { roomId: { in: validRoomIds } },
     });
@@ -797,13 +1225,13 @@ router.patch("/condos/:condoId/rooms/bulk-service", async (req, res) => {
     return res.status(500).json({ error: "Failed to set room service" });
   }
 });
+
 /* =========================
    POST /owner/condos/:condoId/rooms
-   - รองรับ manual + auto (step5)
    ========================= */
 router.post("/condos/:condoId/rooms", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -816,7 +1244,7 @@ router.post("/condos/:condoId/rooms", async (req, res) => {
     if (floorNum === null) return res.status(400).json({ error: "floor is required (number)" });
     if (floorNum < 1 || floorNum > 100) return res.status(400).json({ error: "floor must be 1-100" });
 
-    // AUTO MODE (Step5): ส่งแค่ { floor }
+    // AUTO MODE
     const roomNoMaybe = asTrimmedString(body.roomNo) ?? asTrimmedString(body.number);
     const rentRaw = body.rentPrice ?? body.price;
     const isAuto = !roomNoMaybe && (rentRaw === undefined || rentRaw === null || String(rentRaw).trim() === "");
@@ -873,11 +1301,10 @@ router.post("/condos/:condoId/rooms", async (req, res) => {
 
 /* =========================
    GET /owner/condos/:condoId/rooms
-   ✅ ปรับให้ส่ง serviceIds: string[] (multi-service)
    ========================= */
 router.get("/condos/:condoId/rooms", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -905,11 +1332,7 @@ router.get("/condos/:condoId/rooms", async (req, res) => {
     return res.json(
       rooms.map((r) => {
         const serviceIds = Array.from(
-          new Set(
-            (r.extraChargeAssignments ?? [])
-              .map((x) => x.serviceId)
-              .filter(Boolean)
-          )
+          new Set((r.extraChargeAssignments ?? []).map((x) => x.serviceId).filter(Boolean))
         );
 
         return {
@@ -920,11 +1343,7 @@ router.get("/condos/:condoId/rooms", async (req, res) => {
           isActive: r.isActive,
           occupancyStatus: r.occupancyStatus,
           roomStatus: r.roomStatus,
-
-          // ✅ ให้ frontend เดิมใช้ได้
           serviceId: serviceIds[0] ?? null,
-
-          // ✅ รองรับ multi-service อนาคต
           serviceIds,
         };
       })
@@ -935,12 +1354,216 @@ router.get("/condos/:condoId/rooms", async (req, res) => {
   }
 });
 
+// =========================
+// GET /owner/rooms/:roomId  (RoomDetailPage)
+// =========================
+router.get("/rooms/:roomId", async (req: any, res) => {
+  try {
+    const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+
+    const full = await prisma.room.findUnique({
+      where: { id: room.id },
+      select: {
+        id: true,
+        condoId: true,
+        floor: true,
+        roomNo: true,
+        rentPrice: true,
+        deposit: true,
+        size: true,
+        isActive: true,
+        occupancyStatus: true,
+        roomStatus: true,
+        createdAt: true,
+        updatedAt: true,
+        meter: { select: { waterMeterNo: true, electricMeterNo: true } },
+        extraChargeAssignments: { select: { serviceId: true, service: { select: { id: true, name: true, price: true } } } },
+      },
+    });
+
+    if (!full) return res.status(404).json({ error: "Room not found" });
+
+    return res.json({
+      id: full.id,
+      condoId: full.condoId,
+      floor: full.floor,
+      roomNo: full.roomNo,
+      rentPrice: Number(full.rentPrice ?? 0),
+      deposit: full.deposit ? Number(full.deposit) : null,
+      size: full.size ? Number(full.size) : null,
+      isActive: full.isActive,
+      occupancyStatus: full.occupancyStatus,
+      roomStatus: full.roomStatus,
+      meter: full.meter ?? { waterMeterNo: null, electricMeterNo: null },
+      services: (full.extraChargeAssignments ?? []).map((a) => ({
+        serviceId: a.serviceId,
+        name: a.service?.name ?? "",
+        price: a.service?.price ? Number(a.service.price) : 0,
+      })),
+    });
+  } catch (err: any) {
+    console.error("GET ROOM DETAIL ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+// =========================
+// MonthlyContractPage (RentalContract)
+// =========================
+
+// GET /owner/rooms/:roomId/contracts
+router.get("/rooms/:roomId/contracts", async (req: any, res) => {
+  try {
+    const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+
+    const items = await prisma.rentalContract.findMany({
+      where: { roomId: room.id },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        condoId: true,
+        roomId: true,
+        tenantUserId: true,
+        moveInDate: true,
+        moveOutDate: true,
+        monthlyRent: true,
+        securityDeposit: true,
+        depositPaidBy: true,
+        bookingFeeApplied: true,
+        status: true,
+        createdAt: true,
+        tenant: { select: { id: true, name: true, email: true, phone: true } },
+      },
+    });
+
+    return res.json({
+      items: items.map((c) => ({
+        ...c,
+        monthlyRent: Number(c.monthlyRent ?? 0),
+        securityDeposit: Number(c.securityDeposit ?? 0),
+        bookingFeeApplied: c.bookingFeeApplied ? Number(c.bookingFeeApplied) : 0,
+      })),
+    });
+  } catch (err: any) {
+    console.error("LIST CONTRACTS ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+// GET /owner/contracts/:contractId
+router.get("/contracts/:contractId", async (req: any, res) => {
+  try {
+    const ownerId = req.user?.id;
+    const contractId = String(req.params.contractId);
+
+    const found = await prisma.rentalContract.findFirst({
+      where: { id: contractId, condo: { ownerUserId: ownerId } },
+      include: { tenant: { select: { id: true, name: true, email: true, phone: true } }, room: true },
+    });
+
+    if (!found) return res.status(404).json({ error: "Contract not found" });
+
+    return res.json({
+      ...found,
+      monthlyRent: Number(found.monthlyRent ?? 0),
+      securityDeposit: Number(found.securityDeposit ?? 0),
+      bookingFeeApplied: found.bookingFeeApplied ? Number(found.bookingFeeApplied) : 0,
+    });
+  } catch (err: any) {
+    console.error("GET CONTRACT ERROR:", err);
+    return res.status(500).json({ error: "Failed" });
+  }
+});
+
+// POST /owner/rooms/:roomId/contracts
+router.post("/rooms/:roomId/contracts", async (req: any, res) => {
+  try {
+    const ownerId = req.user?.id;
+    const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+
+    const tenantUserId = String(req.body?.tenantUserId ?? "");
+    const moveInDate = req.body?.moveInDate ? new Date(req.body.moveInDate) : null;
+
+    const monthlyRent = Number(String(req.body?.monthlyRent ?? "").replace(/,/g, ""));
+    const securityDeposit = Number(String(req.body?.securityDeposit ?? "").replace(/,/g, ""));
+
+    const depositPaidBy = String(req.body?.depositPaidBy ?? "CASH");
+    const bookingFeeApplied = req.body?.bookingFeeApplied == null ? 0 : Number(req.body.bookingFeeApplied);
+
+    if (!tenantUserId) return res.status(400).json({ error: "tenantUserId is required" });
+    if (!moveInDate || isNaN(moveInDate.getTime())) return res.status(400).json({ error: "moveInDate is required" });
+    if (!Number.isFinite(monthlyRent) || monthlyRent < 0) return res.status(400).json({ error: "monthlyRent invalid" });
+    if (!Number.isFinite(securityDeposit) || securityDeposit < 0) return res.status(400).json({ error: "securityDeposit invalid" });
+
+    // (ทางเลือก) กันซ้อน: ห้องเดียวมี ACTIVE ได้ 1 สัญญา
+    const active = await prisma.rentalContract.findFirst({
+      where: { roomId: room.id, status: "ACTIVE" },
+      select: { id: true },
+    });
+    if (active) return res.status(400).json({ error: "This room already has an ACTIVE contract" });
+
+    const created = await prisma.rentalContract.create({
+      data: {
+        condoId: room.condoId,
+        roomId: room.id,
+        tenantUserId,
+        moveInDate,
+        monthlyRent: new Prisma.Decimal(String(monthlyRent)),
+        securityDeposit: new Prisma.Decimal(String(securityDeposit)),
+        depositPaidBy,
+        bookingFeeApplied: new Prisma.Decimal(String(bookingFeeApplied ?? 0)),
+        status: "ACTIVE",
+      } as any,
+    });
+
+    return res.status(201).json(created);
+  } catch (err: any) {
+    console.error("CREATE CONTRACT ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+// PATCH /owner/contracts/:contractId
+router.patch("/contracts/:contractId", async (req: any, res) => {
+  try {
+    const ownerId = req.user?.id;
+    const contractId = String(req.params.contractId);
+
+    const found = await prisma.rentalContract.findFirst({
+      where: { id: contractId, condo: { ownerUserId: ownerId } },
+      select: { id: true },
+    });
+    if (!found) return res.status(404).json({ error: "Contract not found" });
+
+    const data: any = {};
+    if (req.body?.moveOutDate) data.moveOutDate = new Date(req.body.moveOutDate);
+    if (req.body?.status) data.status = req.body.status;
+
+    if (req.body?.monthlyRent != null) {
+      const n = Number(String(req.body.monthlyRent).replace(/,/g, ""));
+      if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: "monthlyRent invalid" });
+      data.monthlyRent = new Prisma.Decimal(String(n));
+    }
+
+    if (req.body?.securityDeposit != null) {
+      const n = Number(String(req.body.securityDeposit).replace(/,/g, ""));
+      if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: "securityDeposit invalid" });
+      data.securityDeposit = new Prisma.Decimal(String(n));
+    }
+
+    const updated = await prisma.rentalContract.update({ where: { id: contractId }, data });
+    return res.json(updated);
+  } catch (err: any) {
+    console.error("UPDATE CONTRACT ERROR:", err);
+    return res.status(500).json({ error: "Failed" });
+  }
+});
 /* =========================
    (Step5) POST /owner/condos/:condoId/rooms/generate
    ========================= */
 router.post("/condos/:condoId/rooms/generate", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -980,11 +1603,10 @@ router.post("/condos/:condoId/rooms/generate", async (req, res) => {
 
 /* =========================
    (Step5) PATCH /owner/condos/:condoId/rooms/:roomId
-   - update roomNo / toggle isActive / statuses
    ========================= */
 router.patch("/condos/:condoId/rooms/:roomId", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -1048,11 +1670,10 @@ router.patch("/condos/:condoId/rooms/:roomId", async (req, res) => {
 
 /* =========================
    (Step5) DELETE /owner/condos/:condoId/rooms/:roomId
-   - delete + renumber rooms of that floor to 101,102,...
    ========================= */
 router.delete("/condos/:condoId/rooms/:roomId", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -1110,7 +1731,7 @@ router.delete("/condos/:condoId/rooms/:roomId", async (req, res) => {
    ========================= */
 router.get("/condos/:condoId/services", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -1132,7 +1753,7 @@ router.get("/condos/:condoId/services", async (req, res) => {
 
 router.post("/condos/:condoId/services", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -1171,7 +1792,7 @@ router.post("/condos/:condoId/services", async (req, res) => {
 
 router.delete("/condos/:condoId/services/:serviceId", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -1200,7 +1821,7 @@ router.delete("/condos/:condoId/services/:serviceId", async (req, res) => {
    ========================= */
 router.get("/condos/:condoId/utilities", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -1222,7 +1843,7 @@ router.get("/condos/:condoId/utilities", async (req, res) => {
 
 router.post("/condos/:condoId/utilities", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -1269,7 +1890,7 @@ router.post("/condos/:condoId/utilities", async (req, res) => {
    ========================= */
 router.get("/condos/:condoId/bank-accounts", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -1291,7 +1912,7 @@ router.get("/condos/:condoId/bank-accounts", async (req, res) => {
 
 router.post("/condos/:condoId/bank-accounts", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -1331,7 +1952,7 @@ router.post("/condos/:condoId/bank-accounts", async (req, res) => {
 
 router.delete("/condos/:condoId/bank-accounts/:accountId", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -1359,7 +1980,7 @@ router.delete("/condos/:condoId/bank-accounts/:accountId", async (req, res) => {
    ========================= */
 router.get("/condos/:condoId/payment-instruction", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -1377,7 +1998,7 @@ router.get("/condos/:condoId/payment-instruction", async (req, res) => {
 
 router.put("/condos/:condoId/payment-instruction", async (req, res) => {
   try {
-    const ownerId = req.user?.id;
+    const ownerId = (req as any).user?.id;
     if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
     const condoId = String(req.params.condoId);
@@ -1403,12 +2024,10 @@ router.put("/condos/:condoId/payment-instruction", async (req, res) => {
 
 /** =============================
  * Staff management (Owner) - MVP
- * =============================
- * สร้าง/ลิสต์/แก้ไข เจ้าหน้าที่ พร้อมสิทธิ์เป็นรายโมดูล
- */
+ * ============================= */
 
 router.get("/condos/:condoId/staff", async (req, res) => {
-  const ownerId = req.user?.id;
+  const ownerId = (req as any).user?.id;
   if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
   const condoId = String(req.params.condoId);
@@ -1478,7 +2097,6 @@ router.post("/condos/:condoId/staff", async (req, res) => {
     const condo = await assertOwnerCondo(ownerId, condoId);
     if (!condo) return res.status(403).json({ error: "Forbidden (not your condo)" });
 
-    // 1) หา user เดิมจาก email/phone
     const existing = await prisma.user.findFirst({
       where: { OR: [{ email }, ...(phone ? [{ phone }] : [])] },
       select: {
@@ -1498,7 +2116,6 @@ router.post("/condos/:condoId/staff", async (req, res) => {
 
     let staffUser = existing;
 
-    // 2) Invite Link flow
     if (!staffUser) {
       const initialSecret = crypto.randomBytes(24).toString("base64url");
       const passwordHash = await bcrypt.hash(initialSecret, 10);
@@ -1520,7 +2137,7 @@ router.post("/condos/:condoId/staff", async (req, res) => {
           email: true,
           phone: true,
           name: true,
-          role: true, 
+          role: true,
           emailVerifiedAt: true,
           phoneVerifiedAt: true,
         },
@@ -1549,10 +2166,8 @@ router.post("/condos/:condoId/staff", async (req, res) => {
       });
     }
 
-    // ✅ Guard กัน TS/กันหลุด
     if (!staffUser) return res.status(500).json({ error: "Failed to create staff user" });
 
-    // 3) membership
     const membership = await prisma.staffMembership.upsert({
       where: { staffUserId_condoId: { staffUserId: staffUser.id, condoId } },
       create: {
@@ -1574,7 +2189,6 @@ router.post("/condos/:condoId/staff", async (req, res) => {
 
     await replaceMembershipOverrides(membership.id, allowedModules);
 
-    // 4) Invite
     const token = crypto.randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     const frontend = process.env.FRONTEND_URL || "http://localhost:5173";
@@ -1594,12 +2208,11 @@ router.post("/condos/:condoId/staff", async (req, res) => {
       select: { token: true, expiresAt: true },
     });
 
-    // 5) ส่งอีเมล (Email อย่างเดียว)
     let emailSent = false;
     try {
       await sendStaffInviteEmail(email, {
         inviteUrl,
-        condoName: condo.nameTh, // ✅ ตอนนี้มีแล้ว เพราะ assertOwnerCondo select nameTh
+        condoName: condo.nameTh,
       });
       emailSent = true;
     } catch (mailErr) {
@@ -1631,7 +2244,7 @@ router.post("/condos/:condoId/staff", async (req, res) => {
 });
 
 router.patch("/condos/:condoId/staff/:membershipId", async (req, res) => {
-  const ownerId = req.user?.id;
+  const ownerId = (req as any).user?.id;
   if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
 
   const condoId = String(req.params.condoId);
@@ -1696,6 +2309,261 @@ router.patch("/condos/:condoId/staff/:membershipId", async (req, res) => {
   }
 });
 
+/* =========================
+   ✅ Tenant Room Code (Access Codes) - Disable/Delete
+   ========================= */
+
+// PATCH /owner/rooms/:roomId/access-codes/:codeId/disable
+router.patch("/rooms/:roomId/access-codes/:codeId/disable", async (req: any, res) => {
+  try {
+    const ownerId = req.user?.id;
+    if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
+
+    const roomId = String(req.params.roomId);
+    const codeId = String(req.params.codeId);
+
+    // ต้องเป็น owner ของคอนโดที่ห้องนี้อยู่
+    await assertOwnerRoomOrThrow(req, roomId);
+
+    const found = await prisma.tenantRoomCode.findFirst({
+      where: { id: codeId, roomId },
+      select: { id: true, status: true },
+    });
+
+    if (!found) return res.status(404).json({ error: "Access code not found" });
+
+    const updated = await prisma.tenantRoomCode.update({
+      where: { id: codeId },
+      data: {
+        status: "DISABLED",
+        // (ทางเลือก) ถ้าอยากกัน reuse แบบ “หมดอายุทันที” ด้วย:
+        // expiresAt: new Date(),
+      },
+      select: {
+        id: true,
+        code: true,
+        status: true,
+        expiresAt: true,
+        usedAt: true,
+        usedByUserId: true,
+      },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    console.error("DISABLE ACCESS CODE ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+// DELETE /owner/rooms/:roomId/access-codes/:codeId
+router.delete("/rooms/:roomId/access-codes/:codeId", async (req: any, res) => {
+  try {
+    await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+    const codeId = String(req.params.codeId);
+
+    const found = await prisma.tenantRoomCode.findFirst({
+      where: { id: codeId, roomId: String(req.params.roomId) },
+      select: { id: true },
+    });
+    if (!found) return res.status(404).json({ error: "Access code not found" });
+
+    await prisma.tenantRoomCode.delete({ where: { id: codeId } });
+
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error("DELETE ACCESS CODE ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+/* =========================================================
+   Advance Payments
+   ========================================================= */
+
+// GET /owner/rooms/:roomId/advance-payments
+router.get("/rooms/:roomId/advance-payments", async (req: any, res) => {
+  try {
+    const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+
+    const items = await prisma.advancePayment.findMany({
+      where: { roomId: room.id },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return res.json(items.map((x) => ({
+      ...x,
+      amount: Number(x.amount),
+    })));
+  } catch (err: any) {
+    console.error("LIST ADVANCE PAYMENTS ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+// POST /owner/rooms/:roomId/advance-payments
+router.post("/rooms/:roomId/advance-payments", async (req: any, res) => {
+  try {
+    const ownerId = req.user?.id;
+
+    const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+
+    const amount = Number(req.body?.amount);
+    const note = typeof req.body?.note === "string" ? req.body.note.trim() : null;
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: "amount must be > 0" });
+    }
+
+    const created = await prisma.advancePayment.create({
+      data: {
+        condoId: room.condoId,
+        roomId: room.id,
+        amount: new Prisma.Decimal(String(amount)),
+        note,
+        createdBy: ownerId ?? null,
+      },
+    });
+
+    return res.status(201).json({
+      ...created,
+      amount: Number(created.amount),
+    });
+  } catch (err: any) {
+    console.error("CREATE ADVANCE PAYMENT ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+// DELETE /owner/advance-payments/:id
+router.delete("/advance-payments/:id", async (req: any, res) => {
+  try {
+    const id = String(req.params.id);
+
+    const item = await prisma.advancePayment.findUnique({
+      where: { id },
+      select: { roomId: true },
+    });
+
+    if (!item) return res.status(404).json({ error: "Not found" });
+
+    await assertOwnerRoomOrThrow(req, item.roomId);
+
+    await prisma.advancePayment.delete({ where: { id } });
+
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error("DELETE ADVANCE PAYMENT ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+/* =========================================================
+   Monthly Contracts
+   ========================================================= */
+
+// GET /owner/rooms/:roomId/contracts
+router.get("/rooms/:roomId/contracts", async (req: any, res) => {
+  try {
+    const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+
+    const items = await prisma.roomContract.findMany({
+      where: { roomId: room.id },
+      orderBy: { startDate: "desc" },
+    });
+
+    return res.json(items.map((x) => ({
+      ...x,
+      rentPrice: Number(x.rentPrice),
+      deposit: x.deposit ? Number(x.deposit) : null,
+    })));
+  } catch (err: any) {
+    console.error("LIST CONTRACTS ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+// POST /owner/rooms/:roomId/contracts
+router.post("/rooms/:roomId/contracts", async (req: any, res) => {
+  try {
+    const ownerId = req.user?.id;
+
+    const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+
+    const tenantName = String(req.body?.tenantName ?? "").trim();
+    const startDate = new Date(req.body?.startDate);
+    const rentPrice = Number(req.body?.rentPrice);
+    const deposit = Number(req.body?.deposit ?? 0);
+
+    if (!tenantName) {
+      return res.status(400).json({ error: "tenantName required" });
+    }
+
+    if (!Number.isFinite(rentPrice) || rentPrice <= 0) {
+      return res.status(400).json({ error: "rentPrice invalid" });
+    }
+
+    const created = await prisma.roomContract.create({
+      data: {
+        condoId: room.condoId,
+        roomId: room.id,
+        tenantName,
+        startDate,
+        rentPrice: new Prisma.Decimal(String(rentPrice)),
+        deposit: new Prisma.Decimal(String(deposit)),
+        createdBy: ownerId ?? null,
+      },
+    });
+
+    return res.status(201).json({
+      ...created,
+      rentPrice: Number(created.rentPrice),
+      deposit: Number(created.deposit),
+    });
+  } catch (err: any) {
+    console.error("CREATE CONTRACT ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+// PATCH /owner/contracts/:contractId
+router.patch("/contracts/:contractId", async (req: any, res) => {
+  try {
+    const id = String(req.params.contractId);
+
+    const contract = await prisma.roomContract.findUnique({
+      where: { id },
+      select: { roomId: true },
+    });
+
+    if (!contract) return res.status(404).json({ error: "Not found" });
+
+    await assertOwnerRoomOrThrow(req, contract.roomId);
+
+    const rentPrice = Number(req.body?.rentPrice);
+    const deposit = Number(req.body?.deposit);
+
+    const updated = await prisma.roomContract.update({
+      where: { id },
+      data: {
+        ...(Number.isFinite(rentPrice)
+          ? { rentPrice: new Prisma.Decimal(String(rentPrice)) }
+          : {}),
+        ...(Number.isFinite(deposit)
+          ? { deposit: new Prisma.Decimal(String(deposit)) }
+          : {}),
+      },
+    });
+
+    return res.json({
+      ...updated,
+      rentPrice: Number(updated.rentPrice),
+      deposit: updated.deposit ? Number(updated.deposit) : null,
+    });
+  } catch (err: any) {
+    console.error("UPDATE CONTRACT ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+
 export default router;
-
-
