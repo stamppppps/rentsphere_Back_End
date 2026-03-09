@@ -11,6 +11,9 @@ import parcelRoutes from "./routes/parcel.routes.js";
 dotenv.config();
 
 const app = express();
+app.get("/", (req, res) => {
+  res.send("RentSphere API running");
+});
 
 app.use(
   cors({
