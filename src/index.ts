@@ -13,7 +13,7 @@ dotenv.config();
 
 const app = express();
 app.get("/", (req, res) => {
-  res.send("RentSphere API running🚀 ");
+  res.send("RentSphere API running 🚀 ");
 });
 
 app.use(
