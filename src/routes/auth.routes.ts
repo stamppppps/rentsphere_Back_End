@@ -616,7 +616,7 @@ router.get("/line/callback", async (req, res) => {
     }
 
     // 4) Redirect to frontend with lineUserId
-    const frontendUrl = process.env.APP_URL || "http://localhost:5174";
+    const frontendUrl = (process.env.APP_URL || "http://localhost:5173").replace(/\/+$/, "");
     return res.redirect(
       `${frontendUrl}/owner/line-login-success?lineUserId=${encodeURIComponent(lineUserId)}`
     );

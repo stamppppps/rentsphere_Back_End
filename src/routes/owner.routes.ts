@@ -1373,6 +1373,129 @@ router.delete("/rooms/:roomId/access-codes/:codeId", async (req: any, res) => {
 });
 
 /* =========================
+   GET /owner/rooms/:roomId/contract-detail
+   ดึงรายละเอียดสัญญาปัจจุบัน + ข้อมูลผู้เช่า + บุคคลติดต่อฉุกเฉิน
+   ========================= */
+router.get("/rooms/:roomId/contract-detail", async (req: any, res) => {
+  try {
+    const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+
+    // Find active RentalContract
+    const contract = await prisma.rentalContract.findFirst({
+      where: { roomId: room.id, status: "ACTIVE" },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        moveInDate: true,
+        moveOutDate: true,
+        monthlyRent: true,
+        securityDeposit: true,
+        depositPaidBy: true,
+        bookingFeeApplied: true,
+        status: true,
+        tenantUserId: true,
+        tenant: { select: { id: true, name: true, email: true, phone: true } },
+      },
+    });
+
+    if (!contract) {
+      return res.json({ hasContract: false });
+    }
+
+    // Get TenantProfile
+    const profile = await prisma.tenantProfile.findUnique({
+      where: { userId: contract.tenantUserId },
+      select: {
+        fullName: true,
+        phone: true,
+        idType: true,
+        idNumber: true,
+        address: true,
+        emergencyContacts: {
+          select: {
+            id: true,
+            contactName: true,
+            relationship: true,
+            phone: true,
+          },
+        },
+      },
+    });
+
+    // Get RoomContract for extra info (tenantName etc)
+    const roomContract = await prisma.roomContract.findFirst({
+      where: { roomId: room.id, condoId: room.condoId },
+      orderBy: { createdAt: "desc" },
+      select: { tenantName: true, deposit: true, rentPrice: true },
+    });
+
+    return res.json({
+      hasContract: true,
+      contract: {
+        id: contract.id,
+        moveInDate: contract.moveInDate,
+        moveOutDate: contract.moveOutDate,
+        monthlyRent: Number(contract.monthlyRent ?? 0),
+        securityDeposit: Number(contract.securityDeposit ?? 0),
+        depositPaidBy: contract.depositPaidBy,
+        bookingFeeApplied: contract.bookingFeeApplied ? Number(contract.bookingFeeApplied) : 0,
+        status: contract.status,
+      },
+      tenant: {
+        name: profile?.fullName || roomContract?.tenantName || contract.tenant?.name || "-",
+        phone: profile?.phone || contract.tenant?.phone || "-",
+        idNumber: profile?.idNumber || "-",
+        idType: profile?.idType || "ID_CARD",
+        address: profile?.address || "-",
+      },
+      emergencyContacts: (profile?.emergencyContacts ?? []).map((ec) => ({
+        name: ec.contactName,
+        relationship: ec.relationship || "-",
+        phone: ec.phone,
+      })),
+    });
+  } catch (err: any) {
+    console.error("GET CONTRACT DETAIL ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+/* =========================
+   POST /owner/rooms/:roomId/terminate-contract
+   ยุติสัญญา → set room VACANT
+   ========================= */
+router.post("/rooms/:roomId/terminate-contract", async (req: any, res) => {
+  try {
+    const room = await assertOwnerRoomOrThrow(req, String(req.params.roomId));
+
+    await prisma.$transaction(async (tx) => {
+      // End all active contracts for this room
+      await tx.rentalContract.updateMany({
+        where: { roomId: room.id, status: "ACTIVE" },
+        data: { status: "ENDED", moveOutDate: new Date() },
+      });
+
+      // End active residencies
+      await tx.tenantResidency.updateMany({
+        where: { roomId: room.id, status: "ACTIVE" },
+        data: { status: "ENDED", endDate: new Date() },
+      });
+
+      // Set room to VACANT
+      await tx.room.update({
+        where: { id: room.id },
+        data: { occupancyStatus: "VACANT" },
+      });
+    });
+
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error("TERMINATE CONTRACT ERROR:", err);
+    return res.status(err?.status ?? 500).json({ error: err?.message ?? "Failed" });
+  }
+});
+
+/* =========================
    POST /owner/rooms/:roomId/contracts
    สร้างสัญญาเช่า (room contract + rental contract for access codes)
    ========================= */
@@ -1387,8 +1510,24 @@ router.post("/rooms/:roomId/contracts", async (req: any, res) => {
     const endDateStr = typeof body.endDate === "string" ? body.endDate.trim() : null;
     const rentPerMonth = asOptionalMoneyNumber(body.rentPerMonth);
     const depositVal = asOptionalMoneyNumber(body.deposit);
+    const depositPaidBy = typeof body.depositPaidBy === "string" ? body.depositPaidBy.trim() : "CASH";
+    const bookingFee = asOptionalMoneyNumber(body.bookingFee);
 
-    if (!tenantName) return res.status(400).json({ error: "tenantName is required" });
+    // Tenant profile fields
+    const firstName = typeof body.firstName === "string" ? body.firstName.trim() : "";
+    const lastName = typeof body.lastName === "string" ? body.lastName.trim() : "";
+    const tenantPhone = typeof body.tenantPhone === "string" ? body.tenantPhone.trim() : "";
+    const idNumber = typeof body.idNumber === "string" ? body.idNumber.trim() : "";
+    const address = typeof body.address === "string" ? body.address.trim() : "";
+
+    // Emergency contact fields
+    const ecName = typeof body.emergencyName === "string" ? body.emergencyName.trim() : "";
+    const ecRelationship = typeof body.emergencyRelationship === "string" ? body.emergencyRelationship.trim() : "";
+    const ecPhone = typeof body.emergencyPhone === "string" ? body.emergencyPhone.trim() : "";
+
+    const fullName = tenantName || `${firstName} ${lastName}`.trim() || null;
+
+    if (!fullName) return res.status(400).json({ error: "tenantName is required" });
     if (!startDateStr) return res.status(400).json({ error: "startDate is required" });
     if (rentPerMonth === null || rentPerMonth < 0) {
       return res.status(400).json({ error: "rentPerMonth is required (>= 0)" });
@@ -1406,7 +1545,7 @@ router.post("/rooms/:roomId/contracts", async (req: any, res) => {
         data: {
           condoId: room.condoId,
           roomId: room.id,
-          tenantName,
+          tenantName: fullName,
           startDate,
           endDate,
           rentPrice: new Prisma.Decimal(String(rentPerMonth)),
@@ -1415,11 +1554,9 @@ router.post("/rooms/:roomId/contracts", async (req: any, res) => {
         },
       });
 
-      // 2) Also create/update a RentalContract so access codes can be generated
-      //    (POST /access-codes requires an active RentalContract)
-      //    Create a placeholder tenant user if needed
+      // 2) Create/find tenant user
       let tenantUser = await tx.user.findFirst({
-        where: { name: tenantName, role: "TENANT" },
+        where: { name: fullName, role: "TENANT" },
         select: { id: true },
       });
 
@@ -1427,15 +1564,62 @@ router.post("/rooms/:roomId/contracts", async (req: any, res) => {
         tenantUser = await tx.user.create({
           data: {
             role: "TENANT",
-            name: tenantName,
+            name: fullName,
+            phone: tenantPhone || null,
             isActive: true,
             verifyChannel: "PHONE",
           },
           select: { id: true },
         });
+      } else if (tenantPhone) {
+        await tx.user.update({
+          where: { id: tenantUser.id },
+          data: { phone: tenantPhone },
+        }).catch(() => { }); // ignore if phone conflict
       }
 
-      // Deactivate old rental contracts
+      // 3) Create/update TenantProfile
+      if (firstName || lastName || tenantPhone || idNumber || address) {
+        const profileFullName = `${firstName} ${lastName}`.trim() || fullName;
+        await tx.tenantProfile.upsert({
+          where: { userId: tenantUser.id },
+          update: {
+            fullName: profileFullName,
+            phone: tenantPhone || undefined,
+            idNumber: idNumber || undefined,
+            address: address || undefined,
+          },
+          create: {
+            userId: tenantUser.id,
+            fullName: profileFullName,
+            phone: tenantPhone || null,
+            idType: "ID_CARD",
+            idNumber: idNumber || "-",
+            address: address || null,
+          },
+        });
+      }
+
+      // 4) Create TenantEmergencyContact
+      if (ecName && ecPhone) {
+        const profile = await tx.tenantProfile.findUnique({
+          where: { userId: tenantUser.id },
+          select: { id: true },
+        });
+
+        if (profile) {
+          await tx.tenantEmergencyContact.create({
+            data: {
+              tenantProfileId: profile.id,
+              contactName: ecName,
+              relationship: ecRelationship || null,
+              phone: ecPhone,
+            },
+          });
+        }
+      }
+
+      // 5) Deactivate old rental contracts
       await tx.rentalContract.updateMany({
         where: { roomId: room.id, condoId: room.condoId, status: "ACTIVE" },
         data: { status: "ENDED" },
@@ -1450,12 +1634,13 @@ router.post("/rooms/:roomId/contracts", async (req: any, res) => {
           moveOutDate: endDate,
           monthlyRent: new Prisma.Decimal(String(rentPerMonth)),
           securityDeposit: new Prisma.Decimal(String(depositVal ?? 0)),
-          depositPaidBy: "TENANT",
+          depositPaidBy: depositPaidBy || "TENANT",
+          bookingFeeApplied: bookingFee != null ? new Prisma.Decimal(String(bookingFee)) : undefined,
           status: "ACTIVE",
         },
       });
 
-      // 3) Update room occupancy
+      // 6) Update room occupancy
       await tx.room.update({
         where: { id: room.id },
         data: { occupancyStatus: "OCCUPIED" },
