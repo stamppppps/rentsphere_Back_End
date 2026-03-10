@@ -173,6 +173,7 @@ model CondoUtilitySetting {
   utilityType UtilityType
   billingType UtilityBillingType
   rate        Decimal            @db.Decimal(12, 2)
+  minimumCharge Decimal?         @db.Decimal(12, 2)
   createdBy   String?
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
@@ -1042,6 +1043,8 @@ model MeterReading {
   currElectric  Decimal?           @db.Decimal(12, 2)
   waterUnits    Decimal?           @db.Decimal(12, 2)
   electricUnits Decimal?           @db.Decimal(12, 2)
+  waterCharge    Decimal?           @db.Decimal(12, 2)
+  electricCharge Decimal?           @db.Decimal(12, 2)
   status        MeterReadingStatus @default(PENDING)
   recordedAt    DateTime?
   recordedBy    String?            @db.Uuid
@@ -1056,6 +1059,8 @@ model MeterReading {
 
   @@unique([roomId, cycleId])
   @@index([condoId])
+  @@index([cycleId])
+  @@index([roomId, recordedAt])
 }
 
 model MeterAttachment {
