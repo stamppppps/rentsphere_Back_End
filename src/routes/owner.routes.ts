@@ -1,8 +1,8 @@
 // owner.routes.ts
-import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
+import { Router } from "express";
 import { authRequired } from "../middlewares/auth.js";
 import { requireRole } from "../middlewares/requireRole.js";
 import { uploadMemory } from "../middlewares/uploadMemory.js";
@@ -419,30 +419,6 @@ router.get("/condos", async (req, res) => {
 /* =========================
    GET /owner/condos/:condoId
    ========================= */
-router.get("/condos/:condoId", async (req, res) => {
-  try {
-    const ownerId = (req as any).user?.id;
-    if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
-
-    const condoId = String(req.params.condoId);
-
-    const condo = await prisma.condo.findFirst({
-      where: { id: condoId, ownerUserId: ownerId },
-      include: { billingSetting: true },
-    });
-
-    if (!condo) return res.status(404).json({ error: "Condo not found" });
-
-    return res.json(condo);
-  } catch (err: any) {
-    console.error("GET CONDO ERROR:", err);
-    return res.status(500).json({ error: "Failed to fetch condo" });
-  }
-});
-
-// =========================
-// GET /owner/condos/:condoId/dashboard
-// =========================
 router.get("/condos/:condoId/dashboard", async (req, res) => {
   try {
     const ownerId = (req as any).user?.id;
@@ -467,21 +443,132 @@ router.get("/condos/:condoId/dashboard", async (req, res) => {
       },
     });
 
-    if (!condo) return res.status(404).json({ error: "Condo not found" });
+    if (!condo) {
+      return res.status(404).json({ error: "Condo not found" });
+    }
 
     const rooms = condo.rooms ?? [];
 
     const roomsTotal = rooms.length;
     const roomsActive = rooms.filter((r) => r.isActive).length;
-
-    const occupiedRooms = rooms.filter((r) => r.isActive && r.occupancyStatus === "OCCUPIED").length;
-    const vacantRooms = rooms.filter((r) => r.isActive && r.occupancyStatus === "VACANT").length;
+    const occupiedRooms = rooms.filter(
+      (r) => r.isActive && r.occupancyStatus === "OCCUPIED"
+    ).length;
+    const vacantRooms = rooms.filter(
+      (r) => r.isActive && r.occupancyStatus === "VACANT"
+    ).length;
 
     const activeRoomsForAvg = rooms.filter((r) => r.isActive);
     const avgRentPrice =
       activeRoomsForAvg.length === 0
         ? 0
-        : Math.round(activeRoomsForAvg.reduce((sum, r) => sum + Number(r.rentPrice ?? 0), 0) / activeRoomsForAvg.length);
+        : Math.round(
+            activeRoomsForAvg.reduce(
+              (sum, r) => sum + Number(r.rentPrice ?? 0),
+              0
+            ) / activeRoomsForAvg.length
+          );
+
+    function classifyInvoiceItemType(itemType: string) {
+      const t = String(itemType ?? "").toUpperCase();
+
+      if (t === "RENT") return "RENT";
+      if (t === "ELECTRIC") return "ELECTRIC";
+      if (t === "WATER") return "WATER";
+
+      if (
+        t === "CHARGE" ||
+        t === "EXTRA" ||
+        t === "FACILITY" ||
+        t === "OTHER" ||
+        t === "PENALTY" ||
+        t === "DISCOUNT"
+      ) {
+        return "OTHER";
+      }
+
+      return "OTHER";
+    }
+
+    const now = new Date();
+    const monthLabels: string[] = [];
+    const monthKeys: string[] = [];
+
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const yyyy = d.getFullYear();
+
+      monthLabels.push(`${mm}-${yyyy}`);
+      monthKeys.push(`${yyyy}-${mm}`);
+    }
+
+    const labels = monthLabels;
+
+    const invoices = Array(12).fill(0);
+    const receipts = Array(12).fill(0);
+    const rent = Array(12).fill(0);
+    const elec = Array(12).fill(0);
+    const water = Array(12).fill(0);
+    const other = Array(12).fill(0);
+
+    const startDate = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+
+    const invoiceRows = await prisma.invoice.findMany({
+      where: {
+        condoId,
+        billingMonth: {
+          gte: startDate,
+        },
+      },
+      select: {
+        id: true,
+        billingMonth: true,
+        status: true,
+        totalAmount: true,
+        items: {
+          select: {
+            itemType: true,
+            amount: true,
+          },
+        },
+      },
+      orderBy: {
+        billingMonth: "asc",
+      },
+    });
+
+    for (const inv of invoiceRows) {
+      const d = new Date(inv.billingMonth);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const idx = monthKeys.indexOf(key);
+      if (idx === -1) continue;
+
+      invoices[idx] += 1;
+
+      if (inv.status === "PAID") {
+        receipts[idx] += 1;
+      }
+
+      if (inv.items && inv.items.length > 0) {
+        for (const item of inv.items) {
+          const amt = Number(item.amount ?? 0);
+          const bucket = classifyInvoiceItemType(String(item.itemType ?? ""));
+
+          if (bucket === "RENT") {
+            rent[idx] += amt;
+          } else if (bucket === "ELECTRIC") {
+            elec[idx] += amt;
+          } else if (bucket === "WATER") {
+            water[idx] += amt;
+          } else {
+            other[idx] += amt;
+          }
+        }
+      } else {
+        rent[idx] += Number(inv.totalAmount ?? 0);
+      }
+    }
 
     return res.json({
       summary: {
@@ -492,6 +579,15 @@ router.get("/condos/:condoId/dashboard", async (req, res) => {
         occupiedRooms,
         vacantRooms,
         avgRentPrice,
+      },
+      series12: {
+        labels,
+        invoices,
+        receipts,
+        rent,
+        elec,
+        water,
+        other,
       },
     });
   } catch (err: any) {
@@ -894,80 +990,247 @@ router.post("/condos/:condoId/invoices", async (req, res) => {
     const condoId = String(req.params.condoId);
     await assertOwnerCondoOrThrow(ownerId, condoId);
 
-    const { roomId, totalAmount, status, note } = req.body as {
+    const {
+      roomId,
+      totalAmount,
+      status,
+      note,
+      billingMonth,
+      items,
+    } = req.body as {
       roomId?: string;
       totalAmount?: number;
       status?: string;
       note?: string;
+      billingMonth?: string;
+      items?: Array<{
+        itemType: string;
+        itemName: string;
+        amount: number;
+      }>;
     };
 
-    if (!roomId) return res.status(400).json({ error: "roomId is required" });
+    if (!roomId) {
+      return res.status(400).json({ error: "roomId is required" });
+    }
+
+    const room = await prisma.room.findFirst({
+      where: { id: roomId, condoId },
+      select: { id: true, roomNo: true },
+    });
+
+    if (!room) {
+      return res.status(400).json({ error: "roomId does not belong to this condo" });
+    }
 
     const now = new Date();
-    const billingMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const invoiceNo = `INV-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${roomId.slice(-6).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
 
-    const invoice = await prisma.invoice.create({
-      data: {
-        condoId,
-        roomId,
-        invoiceNo,
-        billingMonth,
-        status: (status === "PAID" ? "PAID" : "ISSUED") as any,
-        issuedAt: now,
-        dueDate: new Date(now.getTime() + 30 * 86400000),
-        subtotal: new Prisma.Decimal(String(totalAmount || 0)),
-        totalAmount: new Prisma.Decimal(String(totalAmount || 0)),
-        note: note || null,
-        createdBy: ownerId,
-      },
-      select: { id: true, invoiceNo: true, status: true, totalAmount: true },
+    const rawBillingMonth = billingMonth ? new Date(billingMonth) : now;
+    if (isNaN(rawBillingMonth.getTime())) {
+      return res.status(400).json({ error: "billingMonth is invalid" });
+    }
+
+    const normalizedBillingMonth = new Date(
+      rawBillingMonth.getFullYear(),
+      rawBillingMonth.getMonth(),
+      1
+    );
+
+    const parsedTotalAmount = Number(totalAmount ?? 0);
+    if (!Number.isFinite(parsedTotalAmount) || parsedTotalAmount < 0) {
+      return res.status(400).json({ error: "totalAmount must be a number >= 0" });
+    }
+
+    const safeStatus =
+      status === "PAID"
+        ? "PAID"
+        : status === "DRAFT"
+        ? "DRAFT"
+        : "ISSUED";
+
+    const safeItems = Array.isArray(items) ? items : [];
+
+    for (const item of safeItems) {
+      if (!item || typeof item !== "object") {
+        return res.status(400).json({ error: "items format is invalid" });
+      }
+
+      const itemType = String(item.itemType ?? "").toUpperCase();
+      const itemName = String(item.itemName ?? "").trim();
+      const amount = Number(item.amount);
+
+      const allowedItemTypes = [
+        "RENT",
+        "WATER",
+        "ELECTRIC",
+        "CHARGE",
+        "EXTRA",
+        "DISCOUNT",
+        "PENALTY",
+        "OTHER",
+        "FACILITY",
+      ];
+
+      if (!allowedItemTypes.includes(itemType)) {
+        return res.status(400).json({ error: `invalid itemType: ${itemType}` });
+      }
+
+      if (!itemName) {
+        return res.status(400).json({ error: "itemName is required in every item" });
+      }
+
+      if (!Number.isFinite(amount) || amount < 0) {
+        return res.status(400).json({ error: "item.amount must be a number >= 0" });
+      }
+    }
+
+    const invoiceNo = `INV-${normalizedBillingMonth.getFullYear()}${String(
+      normalizedBillingMonth.getMonth() + 1
+    ).padStart(2, "0")}-${roomId.slice(-6).toUpperCase()}-${Date.now()
+      .toString(36)
+      .toUpperCase()}`;
+
+    const dueDate = new Date(
+      normalizedBillingMonth.getFullYear(),
+      normalizedBillingMonth.getMonth(),
+      28
+    );
+
+    const result = await prisma.$transaction(async (tx) => {
+      const existing = await tx.invoice.findUnique({
+        where: {
+          roomId_billingMonth: {
+            roomId,
+            billingMonth: normalizedBillingMonth,
+          },
+        },
+        select: { id: true, invoiceNo: true },
+      });
+
+      if (!existing) {
+        const created = await tx.invoice.create({
+          data: {
+            condoId,
+            roomId,
+            invoiceNo,
+            billingMonth: normalizedBillingMonth,
+            status: safeStatus as any,
+            issuedAt: safeStatus === "DRAFT" ? null : now,
+            dueDate,
+            subtotal: new Prisma.Decimal(String(parsedTotalAmount)),
+            totalAmount: new Prisma.Decimal(String(parsedTotalAmount)),
+            note: note || null,
+            createdBy: ownerId,
+            items: {
+              create: safeItems.map((item) => ({
+                itemType: String(item.itemType).toUpperCase() as any,
+                itemName: String(item.itemName).trim(),
+                amount: new Prisma.Decimal(String(Number(item.amount))),
+              })),
+            },
+          },
+          select: {
+            id: true,
+            invoiceNo: true,
+            status: true,
+            totalAmount: true,
+            billingMonth: true,
+            items: {
+              select: {
+                id: true,
+                itemType: true,
+                itemName: true,
+                amount: true,
+              },
+            },
+          },
+        });
+
+        return created;
+      }
+
+      const updated = await tx.invoice.update({
+        where: {
+          roomId_billingMonth: {
+            roomId,
+            billingMonth: normalizedBillingMonth,
+          },
+        },
+        data: {
+          status: safeStatus as any,
+          issuedAt: safeStatus === "DRAFT" ? null : now,
+          dueDate,
+          subtotal: new Prisma.Decimal(String(parsedTotalAmount)),
+          totalAmount: new Prisma.Decimal(String(parsedTotalAmount)),
+          note: note || null,
+        },
+        select: {
+          id: true,
+          invoiceNo: true,
+          status: true,
+          totalAmount: true,
+          billingMonth: true,
+        },
+      });
+
+      await tx.invoiceItem.deleteMany({
+        where: { invoiceId: updated.id },
+      });
+
+      if (safeItems.length > 0) {
+        await tx.invoiceItem.createMany({
+          data: safeItems.map((item) => ({
+            invoiceId: updated.id,
+            itemType: String(item.itemType).toUpperCase() as any,
+            itemName: String(item.itemName).trim(),
+            amount: new Prisma.Decimal(String(Number(item.amount))),
+          })),
+        });
+      }
+
+      const fullUpdated = await tx.invoice.findUnique({
+        where: { id: updated.id },
+        select: {
+          id: true,
+          invoiceNo: true,
+          status: true,
+          totalAmount: true,
+          billingMonth: true,
+          items: {
+            select: {
+              id: true,
+              itemType: true,
+              itemName: true,
+              amount: true,
+            },
+          },
+        },
+      });
+
+      return fullUpdated!;
     });
 
     return res.status(201).json({
       ok: true,
       invoice: {
-        id: invoice.id,
-        invoiceNo: invoice.invoiceNo,
-        status: invoice.status,
-        totalAmount: Number(invoice.totalAmount),
+        id: result.id,
+        invoiceNo: result.invoiceNo,
+        status: result.status,
+        totalAmount: Number(result.totalAmount),
+        billingMonth: result.billingMonth,
+        items: result.items.map((it) => ({
+          id: it.id,
+          itemType: it.itemType,
+          itemName: it.itemName,
+          amount: Number(it.amount),
+        })),
       },
     });
   } catch (err: any) {
-    console.error("CREATE INVOICE ERROR:", err);
-    // Handle unique constraint on [roomId, billingMonth]
-    if (err?.code === "P2002") {
-      // Invoice already exists for this room+month — UPDATE it with new values
-      try {
-        const now = new Date();
-        const billingMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        const { roomId, totalAmount, status, note } = req.body ?? {};
-
-        const updated = await prisma.invoice.update({
-          where: { roomId_billingMonth: { roomId, billingMonth } },
-          data: {
-            totalAmount: totalAmount != null ? new Prisma.Decimal(String(totalAmount)) : undefined,
-            subtotal: totalAmount != null ? new Prisma.Decimal(String(totalAmount)) : undefined,
-            note: note || undefined,
-            status: (status === "PAID" ? "PAID" : status === "ISSUED" ? "ISSUED" : undefined) as any,
-          },
-          select: { id: true, invoiceNo: true, status: true, totalAmount: true },
-        });
-
-        return res.json({
-          ok: true,
-          invoice: {
-            id: updated.id,
-            invoiceNo: updated.invoiceNo,
-            status: updated.status,
-            totalAmount: Number(updated.totalAmount),
-          },
-        });
-      } catch (updateErr) {
-        console.error("UPDATE EXISTING INVOICE ERROR:", updateErr);
-      }
-    }
-    return res.status(500).json({ error: err?.message || "สร้างใบแจ้งหนี้ไม่สำเร็จ" });
+    console.error("CREATE/UPDATE INVOICE ERROR:", err);
+    return res.status(500).json({
+      error: err?.message || "สร้างใบแจ้งหนี้ไม่สำเร็จ",
+    });
   }
 });
 
