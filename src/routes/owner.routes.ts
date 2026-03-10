@@ -419,6 +419,155 @@ router.get("/condos", async (req, res) => {
 /* =========================
    GET /owner/condos/:condoId
    ========================= */
+router.get("/condos/:condoId", async (req, res) => {
+  try {
+    const ownerId = (req as any).user?.id;
+    if (!ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const condoId = String(req.params.condoId);
+
+    const condo = await prisma.condo.findFirst({
+      where: {
+        id: condoId,
+        ownerUserId: ownerId,
+      },
+      include: {
+        billingSetting: true,
+      },
+    });
+
+    if (!condo) {
+      return res.status(404).json({ error: "Condo not found" });
+    }
+
+    return res.json({
+      id: condo.id,
+      nameTh: condo.nameTh,
+      addressTh: condo.addressTh,
+      nameEn: condo.nameEn,
+      addressEn: condo.addressEn,
+      phoneNumber: condo.phoneNumber,
+      taxId: condo.taxId,
+      billingSetting: condo.billingSetting
+        ? {
+            dueDay: condo.billingSetting.dueDay,
+            acceptFine: condo.billingSetting.acceptFine,
+            finePerDay:
+              condo.billingSetting.finePerDay != null
+                ? Number(condo.billingSetting.finePerDay)
+                : null,
+          }
+        : null,
+    });
+  } catch (err: any) {
+    console.error("GET CONDO DETAIL ERROR:", err);
+    return res.status(500).json({ error: "Failed to fetch condo detail" });
+  }
+});
+
+/* =========================
+   PUT /owner/condos/:condoId
+   ========================= */
+router.put("/condos/:condoId", async (req, res) => {
+  try {
+    const ownerId = (req as any).user?.id;
+    if (!ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const condoId = String(req.params.condoId);
+    const body = req.body ?? {};
+
+    const condo = await prisma.condo.findFirst({
+      where: { id: condoId, ownerUserId: ownerId },
+      select: { id: true },
+    });
+
+    if (!condo) {
+      return res.status(404).json({ error: "Condo not found" });
+    }
+
+    const nameTh = asTrimmedString(body.nameTh);
+    const addressTh = asTrimmedString(body.addressTh);
+
+    if (!nameTh) {
+      return res.status(400).json({ error: "nameTh is required" });
+    }
+    if (!addressTh) {
+      return res.status(400).json({ error: "addressTh is required" });
+    }
+
+    const nameEn = asTrimmedString(body.nameEn);
+    const addressEn = asTrimmedString(body.addressEn);
+    const phoneNumber = asTrimmedString(body.phoneNumber);
+    const taxId = asTrimmedString(body.taxId);
+
+    const billing = body.billing ?? {};
+    const dueDay = asOptionalInt(billing.dueDay);
+    const acceptFine = Boolean(billing.acceptFine ?? false);
+    const finePerDay = acceptFine ? asOptionalMoneyNumber(billing.finePerDay) : null;
+
+    if (!dueDay || dueDay < 1 || dueDay > 28) {
+      return res.status(400).json({ error: "billing.dueDay must be 1-28" });
+    }
+
+    if (acceptFine && (finePerDay === null || finePerDay < 0)) {
+      return res.status(400).json({
+        error: "billing.finePerDay is required (>=0) when acceptFine=true",
+      });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.condo.update({
+        where: { id: condoId },
+        data: {
+          nameTh,
+          addressTh,
+          nameEn,
+          addressEn,
+          phoneNumber,
+          taxId,
+        },
+      });
+
+      await tx.condoBillingSetting.upsert({
+        where: { condoId },
+        create: {
+          condoId,
+          dueDay,
+          acceptFine,
+          finePerDay: acceptFine ? new Prisma.Decimal(String(finePerDay ?? 0)) : new Prisma.Decimal("0"),
+        },
+        update: {
+          dueDay,
+          acceptFine,
+          finePerDay: acceptFine ? new Prisma.Decimal(String(finePerDay ?? 0)) : new Prisma.Decimal("0"),
+        },
+      });
+
+      return tx.condo.findUnique({
+        where: { id: condoId },
+        include: {
+          billingSetting: true,
+        },
+      });
+    });
+
+    return res.json(updated);
+  } catch (err: any) {
+    console.error("UPDATE CONDO ERROR:", err);
+    return res.status(500).json({
+      error: "Failed to update condo",
+      detail: String(err?.message ?? err),
+    });
+  }
+});
+
+/* =========================
+   GET /owner/condos/:condoId
+   ========================= */
 router.get("/condos/:condoId/dashboard", async (req, res) => {
   try {
     const ownerId = (req as any).user?.id;
