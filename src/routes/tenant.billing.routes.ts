@@ -1,6 +1,8 @@
 import { InvoiceStatus } from "@prisma/client";
 import { Router } from "express";
 import { prisma } from "../prisma.js";
+import { uploadMemory } from "../middlewares/uploadMemory.js";
+import { verifySlipWithSlipOK } from "../utils/slipok.js";
 
 const router = Router();
 
@@ -257,5 +259,108 @@ router.get("/:invoiceId", async (req, res) => {
     res.status(e.status ?? 500).json({ error: e.message });
   }
 });
+
+/* =========================================================
+   VERIFY SLIP  —  POST /:invoiceId/verify-slip
+   รับ multipart/form-data field "slip" (image)
+   ส่งไป SlipOK → ถ้าผ่าน อัพเดท invoice => PAID
+   ========================================================= */
+router.post(
+  "/:invoiceId/verify-slip",
+  uploadMemory.single("slip"),
+  async (req: any, res) => {
+    try {
+      const invoiceId = String(req.params.invoiceId || "").trim();
+      if (!invoiceId) {
+        return res.status(400).json({ success: false, error: "invoiceId is required" });
+      }
+
+      const file = req.file;
+      if (!file || !file.buffer) {
+        return res.status(400).json({ success: false, error: "กรุณาแนบรูปสลิป" });
+      }
+
+      // Find the invoice
+      const invoice = await prisma.invoice.findUnique({
+        where: { id: invoiceId },
+        select: {
+          id: true,
+          invoiceNo: true,
+          totalAmount: true,
+          status: true,
+          roomId: true,
+          condoId: true,
+          room: { select: { roomNo: true } },
+        },
+      });
+
+      if (!invoice) {
+        return res.status(404).json({ success: false, error: "ไม่พบใบแจ้งหนี้" });
+      }
+
+      if (invoice.status === "PAID") {
+        return res.status(400).json({ success: false, error: "ใบแจ้งหนี้นี้ชำระแล้ว" });
+      }
+
+      // Verify with SlipOK
+      console.log("=== WEB SLIP VERIFICATION START ===");
+      console.log(`invoiceId=${invoiceId}, invoiceNo=${invoice.invoiceNo}`);
+
+      const slipResult = await verifySlipWithSlipOK(file.buffer);
+      console.log("SlipOK result:", JSON.stringify(slipResult));
+
+      if (slipResult.success) {
+        // Update invoice to PAID
+        await prisma.invoice.update({
+          where: { id: invoice.id },
+          data: { status: "PAID" as any },
+        });
+
+        // Create payment transaction record
+        await prisma.paymentTransaction.create({
+          data: {
+            invoiceId: invoice.id,
+            condoId: invoice.condoId,
+            amount: invoice.totalAmount,
+            method: "TRANSFER" as any,
+            status: "CONFIRMED" as any,
+            paidAt: new Date(),
+          },
+        });
+
+        const transferAmount = slipResult.data?.amount || slipResult.data?.transAmount || null;
+        const transferFrom = slipResult.data?.sender?.name || slipResult.data?.sendingBank || null;
+        const transRef = slipResult.data?.transRef || null;
+
+        console.log("=== WEB SLIP VERIFICATION COMPLETE - PAID ===");
+
+        return res.json({
+          success: true,
+          invoiceNo: invoice.invoiceNo,
+          roomNo: invoice.room?.roomNo ?? "-",
+          totalAmount: Number(invoice.totalAmount),
+          slipData: {
+            transferAmount: transferAmount ? Number(transferAmount) : null,
+            transferFrom,
+            transRef,
+          },
+        });
+      } else {
+        console.log("=== WEB SLIP VERIFICATION COMPLETE - FAILED ===");
+
+        return res.json({
+          success: false,
+          error: slipResult.error || "ตรวจ slip ไม่สำเร็จ",
+        });
+      }
+    } catch (err: any) {
+      console.error("WEB SLIP VERIFY ERROR:", err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || "เกิดข้อผิดพลาดในการตรวจสอบ slip",
+      });
+    }
+  }
+);
 
 export default router;
