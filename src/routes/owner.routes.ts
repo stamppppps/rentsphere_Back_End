@@ -2515,6 +2515,32 @@ router.patch("/condos/:condoId/rooms/:roomId", async (req, res) => {
 });
 
 /* =========================
+   DELETE /owner/condos/:condoId  —  ลบคอนโดทั้งหมด
+   ========================= */
+router.delete("/condos/:condoId", async (req: any, res) => {
+  try {
+    const ownerId = req.user?.id;
+    if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
+
+    const condoId = String(req.params.condoId);
+
+    // Verify ownership
+    const condo = await prisma.condo.findFirst({
+      where: { id: condoId, ownerUserId: ownerId },
+      select: { id: true, nameTh: true },
+    });
+    if (!condo) return res.status(403).json({ error: "Forbidden (not your condo)" });
+
+    await prisma.condo.delete({ where: { id: condoId } });
+
+    return res.json({ ok: true, message: `ลบคอนโด "${condo.nameTh}" เรียบร้อย` });
+  } catch (err: any) {
+    console.error("DELETE CONDO ERROR:", err);
+    return res.status(500).json({ error: err?.message ?? "ลบคอนโดไม่สำเร็จ" });
+  }
+});
+
+/* =========================
    (Step5) DELETE /owner/condos/:condoId/rooms/:roomId
    ========================= */
 router.delete("/condos/:condoId/rooms/:roomId", async (req, res) => {
