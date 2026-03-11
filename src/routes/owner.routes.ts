@@ -2207,16 +2207,14 @@ router.get("/condos/:condoId/rooms", async (req, res) => {
     const rooms = await prisma.room.findMany({
       where: { condoId },
       orderBy: [{ floor: "asc" }, { roomNo: "asc" }],
-      select: {
-        id: true,
-        floor: true,
-        roomNo: true,
-        rentPrice: true,
-        isActive: true,
-        occupancyStatus: true,
-        roomStatus: true,
+      include: {
         extraChargeAssignments: {
           select: { serviceId: true },
+        },
+        residencies: {
+          where: { status: "ACTIVE" },
+          take: 1,
+          select: { tenant: { select: { name: true } } },
         },
       },
     });
@@ -2227,6 +2225,7 @@ router.get("/condos/:condoId/rooms", async (req, res) => {
           new Set((r.extraChargeAssignments ?? []).map((x) => x.serviceId).filter(Boolean))
         );
 
+        const tenantName = (r as any).residencies?.[0]?.tenant?.name || null;
         return {
           id: r.id,
           floor: r.floor,
@@ -2237,6 +2236,7 @@ router.get("/condos/:condoId/rooms", async (req, res) => {
           roomStatus: r.roomStatus,
           serviceId: serviceIds[0] ?? null,
           serviceIds,
+          tenantName,
         };
       })
     );
