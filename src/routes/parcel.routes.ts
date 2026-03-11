@@ -159,6 +159,11 @@ router.get("/room", async (req, res) => {
                 createdAt: true,
                 pickedUpAt: true,
                 room: { select: { roomNo: true } },
+                tenant: { select: { name: true } },
+                attachments: {
+                    select: { fileUrl: true },
+                    take: 1,
+                },
             },
         });
 
@@ -171,8 +176,10 @@ router.get("/room", async (req, res) => {
                 status: p.status,
                 note: p.pickupNote,
                 room: p.room?.roomNo || null,
+                tenantName: p.tenant?.name || null,
                 createdAt: p.createdAt.toISOString(),
                 pickedUpAt: p.pickedUpAt?.toISOString() || null,
+                imageUrl: p.attachments?.[0]?.fileUrl || null,
             })),
         });
     } catch (err: any) {
