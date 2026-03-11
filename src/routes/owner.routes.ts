@@ -1701,22 +1701,42 @@ router.post("/rooms/:roomId/contracts", async (req: any, res) => {
         select: { id: true },
       });
 
+      let phoneForUser = tenantPhone || null;
+      if (tenantPhone) {
+        const phoneOwner = await tx.user.findUnique({
+          where: { phone: tenantPhone },
+          select: { id: true, role: true },
+        });
+
+        if (phoneOwner) {
+          // Reuse existing TENANT account with the same phone when possible.
+          if (!tenantUser && phoneOwner.role === "TENANT") {
+            tenantUser = { id: phoneOwner.id };
+          }
+
+          // Avoid unique-constraint failure when phone belongs to another user.
+          if (!tenantUser || phoneOwner.id !== tenantUser.id) {
+            phoneForUser = null;
+          }
+        }
+      }
+
       if (!tenantUser) {
         tenantUser = await tx.user.create({
           data: {
             role: "TENANT",
             name: fullName,
-            phone: tenantPhone || null,
+            phone: phoneForUser,
             isActive: true,
             verifyChannel: "PHONE",
           },
           select: { id: true },
         });
-      } else if (tenantPhone) {
+      } else if (phoneForUser) {
         await tx.user.update({
           where: { id: tenantUser.id },
-          data: { phone: tenantPhone },
-        }).catch(() => { }); // ignore if phone conflict
+          data: { phone: phoneForUser },
+        });
       }
 
       // 3) Create/update TenantProfile

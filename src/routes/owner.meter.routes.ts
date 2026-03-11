@@ -7,6 +7,76 @@ const router = Router();
 
 router.use(authRequired, requireRole(["OWNER"]));
 
+let meterChargeColumnsAvailable: boolean | null = null;
+let utilityMinimumChargeColumnAvailable: boolean | null = null;
+
+async function hasMeterChargeColumns() {
+  if (meterChargeColumnsAvailable !== null) {
+    return meterChargeColumnsAvailable;
+  }
+
+  const columns = await prisma.$queryRaw<Array<{ column_name: string }>>`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'MeterReading'
+      AND column_name IN ('waterCharge', 'electricCharge')
+  `;
+
+  meterChargeColumnsAvailable = columns.length === 2;
+  return meterChargeColumnsAvailable;
+}
+
+async function hasUtilityMinimumChargeColumn() {
+  if (utilityMinimumChargeColumnAvailable !== null) {
+    return utilityMinimumChargeColumnAvailable;
+  }
+
+  const columns = await prisma.$queryRaw<Array<{ column_name: string }>>`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'CondoUtilitySetting'
+      AND column_name = 'minimumCharge'
+  `;
+
+  utilityMinimumChargeColumnAvailable = columns.length === 1;
+  return utilityMinimumChargeColumnAvailable;
+}
+
+function meterReadingSelect(withCharges: boolean) {
+  return {
+    id: true,
+    condoId: true,
+    roomId: true,
+    cycleId: true,
+    prevWater: true,
+    currWater: true,
+    prevElectric: true,
+    currElectric: true,
+    waterUnits: true,
+    electricUnits: true,
+    status: true,
+    recordedAt: true,
+    note: true,
+    ...(withCharges
+      ? {
+          waterCharge: true,
+          electricCharge: true,
+        }
+      : {}),
+  };
+}
+
+function condoUtilitySettingSelect(withMinimumCharge: boolean) {
+  return {
+    utilityType: true,
+    billingType: true,
+    rate: true,
+    ...(withMinimumCharge ? { minimumCharge: true } : {}),
+  };
+}
+
 /* =========================
    Helpers
 ========================= */
@@ -160,6 +230,7 @@ async function findOrCreateCycleForMonth(condoId: string, targetMonth: Date) {
 }
 
 async function findPreviousReading(roomId: string, currentCycleMonth: Date) {
+  const withCharges = await hasMeterChargeColumns();
   return prisma.meterReading.findFirst({
     where: {
       roomId,
@@ -173,6 +244,16 @@ async function findPreviousReading(roomId: string, currentCycleMonth: Date) {
       cycle: {
         cycleMonth: "desc",
       },
+    },
+    select: {
+      currWater: true,
+      currElectric: true,
+      ...(withCharges
+        ? {
+            waterCharge: true,
+            electricCharge: true,
+          }
+        : {}),
     },
   });
 }
@@ -237,6 +318,7 @@ router.get("/rooms/:roomId/meters", async (req, res) => {
 
     const month = parseMonthInput(req.query.month);
     const cycle = await findOrCreateCycleForMonth(room.condoId, month);
+    const withCharges = await hasMeterChargeColumns();
 
     const reading = await prisma.meterReading.findUnique({
       where: {
@@ -245,6 +327,7 @@ router.get("/rooms/:roomId/meters", async (req, res) => {
           cycleId: cycle.id,
         },
       },
+      select: meterReadingSelect(withCharges),
     });
 
     const prevReading = await findPreviousReading(room.id, cycle.cycleMonth);
@@ -297,6 +380,8 @@ router.get("/rooms/:roomId/meters", async (req, res) => {
 router.post("/rooms/:roomId/meters", async (req, res) => {
   try {
     const room = await assertOwnerRoomOrThrow(req, req.params.roomId);
+    const withCharges = await hasMeterChargeColumns();
+    const withMinimumCharge = await hasUtilityMinimumChargeColumn();
 
     const { cycleId, month, currWater, currElectric, note } = req.body;
 
@@ -341,6 +426,10 @@ router.post("/rooms/:roomId/meters", async (req, res) => {
             cycleMonth: "desc",
           },
         },
+        select: {
+          currWater: true,
+          currElectric: true,
+        },
       });
 
       const prevWater = Number(prevReading?.currWater ?? 0);
@@ -363,6 +452,7 @@ router.post("/rooms/:roomId/meters", async (req, res) => {
 
       const settings = await tx.condoUtilitySetting.findMany({
         where: { condoId: room.condoId },
+        select: condoUtilitySettingSelect(withMinimumCharge),
       });
 
       const waterSetting = settings.find((s) => s.utilityType === "WATER");
@@ -373,7 +463,11 @@ router.post("/rooms/:roomId/meters", async (req, res) => {
             waterUnits,
             waterSetting.billingType,
             Number(waterSetting.rate),
-            waterSetting.minimumCharge == null ? null : Number(waterSetting.minimumCharge)
+            withMinimumCharge
+              ? waterSetting.minimumCharge == null
+                ? null
+                : Number(waterSetting.minimumCharge)
+              : null
           )
         : 0;
 
@@ -382,7 +476,11 @@ router.post("/rooms/:roomId/meters", async (req, res) => {
             electricUnits,
             electricSetting.billingType,
             Number(electricSetting.rate),
-            electricSetting.minimumCharge == null ? null : Number(electricSetting.minimumCharge)
+            withMinimumCharge
+              ? electricSetting.minimumCharge == null
+                ? null
+                : Number(electricSetting.minimumCharge)
+              : null
           )
         : 0;
 
@@ -400,8 +498,12 @@ router.post("/rooms/:roomId/meters", async (req, res) => {
           currElectric: safeCurrElectric,
           waterUnits,
           electricUnits,
-          waterCharge,
-          electricCharge,
+          ...(withCharges
+            ? {
+                waterCharge,
+                electricCharge,
+              }
+            : {}),
           note: safeNote,
           status: "SUBMITTED",
           recordedBy: req.user?.id,
@@ -417,13 +519,18 @@ router.post("/rooms/:roomId/meters", async (req, res) => {
           currElectric: safeCurrElectric,
           waterUnits,
           electricUnits,
-          waterCharge,
-          electricCharge,
+          ...(withCharges
+            ? {
+                waterCharge,
+                electricCharge,
+              }
+            : {}),
           note: safeNote,
           status: "SUBMITTED",
           recordedBy: req.user?.id,
           recordedAt: new Date(),
         },
+        select: meterReadingSelect(withCharges),
       });
     });
 
@@ -456,10 +563,12 @@ router.post("/rooms/:roomId/meters", async (req, res) => {
 router.get("/rooms/:roomId/meters/history", async (req, res) => {
   try {
     const room = await assertOwnerRoomOrThrow(req, req.params.roomId);
+    const withCharges = await hasMeterChargeColumns();
 
     const list = await prisma.meterReading.findMany({
       where: { roomId: room.id },
-      include: {
+      select: {
+        ...meterReadingSelect(withCharges),
         cycle: true,
       },
       orderBy: {
@@ -490,6 +599,7 @@ router.get("/condos/:condoId/meters", async (req, res) => {
 
     const month = parseMonthInput(req.query.month);
     const cycle = await findOrCreateCycleForMonth(req.params.condoId, month);
+    const withCharges = await hasMeterChargeColumns();
 
     const rooms = await prisma.room.findMany({
       where: { condoId: req.params.condoId },
@@ -503,6 +613,7 @@ router.get("/condos/:condoId/meters", async (req, res) => {
       where: {
         cycleId: cycle.id,
       },
+      select: meterReadingSelect(withCharges),
       orderBy: {
         roomId: "asc",
       },

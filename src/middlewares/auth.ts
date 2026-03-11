@@ -10,8 +10,18 @@ declare global{
 }
 
 export function authRequired(req: Request, res: Response, next: NextFunction) {
-  const header = req.headers.authorization; 
-  const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
+  const authHeader = typeof req.headers.authorization === "string" ? req.headers.authorization.trim() : "";
+  const bearerMatch = /^Bearer\s+(.+)$/i.exec(authHeader);
+  const bearerToken = bearerMatch?.[1]?.trim() || "";
+  const rawAuthToken = bearerToken ? "" : authHeader;
+  const headerToken = typeof req.headers["x-access-token"] === "string" ? req.headers["x-access-token"].trim() : "";
+  const cookieToken =
+    typeof req.cookies?.token === "string"
+      ? req.cookies.token.trim()
+      : typeof req.cookies?.accessToken === "string"
+        ? req.cookies.accessToken.trim()
+        : "";
+  const token = bearerToken || rawAuthToken || headerToken || cookieToken;
 
   if (!token) return res.status(401).json({ error: "Missing token" });
 
