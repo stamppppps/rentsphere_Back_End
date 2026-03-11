@@ -6,6 +6,8 @@ import tenantRoutes from "./tenant.routes.js";
 import authRoutes from "./auth.routes.js";
 import staffInviteRoutes from "./staffInvite.routes.js";
 import lineRoutes from "./line.routes.js";
+import ownerMeterRoutes from "./owner.meter.routes.js";
+
 
 const router = Router();
 
@@ -16,6 +18,7 @@ router.use("/owner", ownerRoutes);
 router.use("/tenant", tenantRoutes);
 router.use("/auth", authRoutes);
 router.use("/staff-invites", staffInviteRoutes);
+router.use("/owner", ownerMeterRoutes);
 
 
 
