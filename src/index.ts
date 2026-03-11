@@ -7,6 +7,9 @@ import authRoutes from "./routes/auth.routes.js";
 import dormRoutes from "./routes/dorm.routes.js";
 import repairRoutes from "./routes/repair.routes.js";
 import parcelRoutes from "./routes/parcel.routes.js";
+import tenantBillingRoutes from "./routes/tenant.billing.routes.js";
+import router from "./routes/parcel.routes.js";
+
 
 dotenv.config();
 
@@ -18,6 +21,7 @@ app.use(
       "http://localhost:5173",
       "http://localhost:5174",
       "http://localhost:5175",
+
     ],
     credentials: true,
   })
@@ -33,6 +37,8 @@ app.use(
   })
 );
 
+
+
 app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
 // health check
@@ -46,6 +52,7 @@ app.use("/auth", authRoutes);
 app.use("/dorm", dormRoutes);
 app.use("/repair", repairRoutes);
 app.use("/parcel", parcelRoutes);
+app.use("/tenant-billing", tenantBillingRoutes);
 
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
