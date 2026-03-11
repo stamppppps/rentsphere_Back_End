@@ -74,6 +74,20 @@ function calcUtilityCharge(
   return usage;
 }
 
+function mapReadingNumbers<T extends Record<string, any>>(r: T) {
+  return {
+    ...r,
+    prevWater: Number(r.prevWater ?? 0),
+    currWater: Number(r.currWater ?? 0),
+    prevElectric: Number(r.prevElectric ?? 0),
+    currElectric: Number(r.currElectric ?? 0),
+    waterUnits: Number(r.waterUnits ?? 0),
+    electricUnits: Number(r.electricUnits ?? 0),
+    waterCharge: Number(r.waterCharge ?? 0),
+    electricCharge: Number(r.electricCharge ?? 0),
+  };
+}
+
 async function assertOwnerRoomOrThrow(req: any, roomId: string) {
   const ownerId = req.user?.id;
 
@@ -87,6 +101,8 @@ async function assertOwnerRoomOrThrow(req: any, roomId: string) {
       condoId: true,
       roomNo: true,
       floor: true,
+      occupancyStatus: true,
+      roomStatus: true,
     },
   });
 
@@ -161,20 +177,6 @@ async function findPreviousReading(roomId: string, currentCycleMonth: Date) {
   });
 }
 
-function mapReadingNumbers<T extends Record<string, any>>(r: T) {
-  return {
-    ...r,
-    prevWater: Number(r.prevWater ?? 0),
-    currWater: Number(r.currWater ?? 0),
-    prevElectric: Number(r.prevElectric ?? 0),
-    currElectric: Number(r.currElectric ?? 0),
-    waterUnits: Number(r.waterUnits ?? 0),
-    electricUnits: Number(r.electricUnits ?? 0),
-    waterCharge: Number(r.waterCharge ?? 0),
-    electricCharge: Number(r.electricCharge ?? 0),
-  };
-}
-
 /* =========================
    ROOM METER NUMBER
 ========================= */
@@ -246,11 +248,25 @@ router.get("/rooms/:roomId/meters", async (req, res) => {
     });
 
     const prevReading = await findPreviousReading(room.id, cycle.cycleMonth);
+    const meter = await prisma.roomMeter.findUnique({
+      where: { roomId: room.id },
+    });
 
     res.json({
       month: cycle.cycleMonth,
       cycleId: cycle.id,
       cycleStatus: cycle.status,
+      room: {
+        id: room.id,
+        roomNo: room.roomNo,
+        floor: room.floor,
+        occupancyStatus: room.occupancyStatus,
+        roomStatus: room.roomStatus,
+      },
+      meter: meter ?? {
+        waterMeterNo: null,
+        electricMeterNo: null,
+      },
       prevWater: Number(prevReading?.currWater ?? 0),
       prevElectric: Number(prevReading?.currElectric ?? 0),
       reading: reading
