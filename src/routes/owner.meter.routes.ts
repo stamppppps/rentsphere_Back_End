@@ -517,7 +517,7 @@ router.get("/condos/:condoId/meters", async (req, res) => {
     });
   } catch (e: any) {
     console.error("CONDO OVERVIEW ERROR:", e);
-    res.status(e.status ?? 500).json({ error: e.message });
+    res.status(e.status ?? 500).json({ error: e.message || "Failed to fetch meters", details: e });
   }
 });
 

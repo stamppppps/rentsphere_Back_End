@@ -2683,7 +2683,7 @@ router.get("/condos/:condoId/utilities", async (req, res) => {
     return res.json(list);
   } catch (err: any) {
     console.error("LIST UTILITIES ERROR:", err);
-    return res.status(500).json({ error: "Failed to fetch utilities" });
+    return res.status(500).json({ error: err.message || "Failed to fetch utilities", details: err });
   }
 });
 
@@ -2727,7 +2727,7 @@ router.post("/condos/:condoId/utilities", async (req, res) => {
     return res.status(201).json(saved);
   } catch (err: any) {
     console.error("SAVE UTILITY ERROR:", err);
-    return res.status(500).json({ error: "Failed to save utility" });
+    return res.status(500).json({ error: err.message || "Failed to save utility", details: err });
   }
 });
 
