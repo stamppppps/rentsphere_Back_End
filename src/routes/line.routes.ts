@@ -186,16 +186,40 @@ router.post("/webhook", async (req: any, res) => {
             console.log("Step 5 - SlipOK result:", JSON.stringify(slipResult));
 
             if (slipResult.success) {
-              // Update invoice to PAID
+              const transferAmount = Number(slipResult.data?.amount || slipResult.data?.transAmount || 0);
+              const invoiceAmount = Number(invoice.totalAmount);
+              const transferFrom = slipResult.data?.sender?.name || slipResult.data?.sendingBank || "";
+
+              // ตรวจสอบยอดเงิน: ต้องโอนมาตรงหรือมากกว่ายอดใบแจ้งหนี้
+              if (transferAmount > 0 && transferAmount < invoiceAmount) {
+                const diff = invoiceAmount - transferAmount;
+                await replyMessage(replyToken, [
+                  {
+                    type: "text",
+                    text:
+                      `❌ ยอดโอนไม่ตรงกับใบแจ้งหนี้\n` +
+                      `━━━━━━━━━━━━━━━\n` +
+                      `📋 ใบแจ้งหนี้: ${invoice.invoiceNo}\n` +
+                      `🚪 ห้อง: ${invoice.room?.roomNo ?? "-"}\n` +
+                      `💰 ยอดที่ต้องชำระ: ฿${invoiceAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })}\n` +
+                      `💵 ยอดที่โอนมา: ฿${transferAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })}\n` +
+                      `📉 ขาดอีก: ฿${diff.toLocaleString("en-US", { minimumFractionDigits: 2 })}\n` +
+                      `━━━━━━━━━━━━━━━\n` +
+                      `กรุณาโอนเงินให้ครบยอดแล้วส่ง slip ใหม่ค่ะ 🙏`,
+                  },
+                ]);
+                console.log(`=== SLIP AMOUNT MISMATCH: transfer=${transferAmount}, invoice=${invoiceAmount} ===`);
+                continue;
+              }
+
+              // ยอดตรงหรือมากกว่า → อัพเดท invoice เป็น PAID
               await prisma.invoice.update({
                 where: { id: invoice.id },
                 data: { status: "PAID" as any },
               });
               console.log("Step 6 - invoice updated to PAID");
 
-              const amountStr = `฿${Number(invoice.totalAmount).toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
-              const transferAmount = slipResult.data?.amount || slipResult.data?.transAmount || "";
-              const transferFrom = slipResult.data?.sender?.name || slipResult.data?.sendingBank || "";
+              const amountStr = `฿${invoiceAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
 
               await replyMessage(replyToken, [
                 {
@@ -206,7 +230,7 @@ router.post("/webhook", async (req: any, res) => {
                     `📋 ใบแจ้งหนี้: ${invoice.invoiceNo}\n` +
                     `🚪 ห้อง: ${invoice.room?.roomNo ?? "-"}\n` +
                     `💰 ยอด: ${amountStr}\n` +
-                    (transferAmount ? `💵 โอน: ฿${Number(transferAmount).toLocaleString()}\n` : "") +
+                    (transferAmount ? `💵 โอน: ฿${transferAmount.toLocaleString()}\n` : "") +
                     (transferFrom ? `🏦 จาก: ${transferFrom}\n` : "") +
                     `━━━━━━━━━━━━━━━\n` +
                     `📌 สถานะ: ✅ ชำระแล้ว\n\n` +

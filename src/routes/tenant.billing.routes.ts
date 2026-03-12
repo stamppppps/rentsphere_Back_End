@@ -310,7 +310,29 @@ router.post(
       console.log("SlipOK result:", JSON.stringify(slipResult));
 
       if (slipResult.success) {
-        // Update invoice to PAID
+        const transferAmount = Number(slipResult.data?.amount || slipResult.data?.transAmount || 0);
+        const invoiceAmount = Number(invoice.totalAmount);
+        const transferFrom = slipResult.data?.sender?.name || slipResult.data?.sendingBank || null;
+        const transRef = slipResult.data?.transRef || null;
+
+        // ตรวจสอบยอดเงิน: ต้องโอนมาตรงหรือมากกว่ายอดใบแจ้งหนี้
+        if (transferAmount > 0 && transferAmount < invoiceAmount) {
+          const diff = invoiceAmount - transferAmount;
+          console.log(`=== WEB SLIP AMOUNT MISMATCH: transfer=${transferAmount}, invoice=${invoiceAmount} ===`);
+          return res.json({
+            success: false,
+            error: `ยอดโอนไม่ตรง — ต้องชำระ ฿${invoiceAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })} แต่โอนมา ฿${transferAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })} (ขาดอีก ฿${diff.toLocaleString("en-US", { minimumFractionDigits: 2 })})`,
+            slipData: {
+              transferAmount,
+              invoiceAmount,
+              difference: diff,
+              transferFrom,
+              transRef,
+            },
+          });
+        }
+
+        // ยอดตรงหรือมากกว่า → อัพเดท invoice เป็น PAID
         await prisma.invoice.update({
           where: { id: invoice.id },
           data: { status: "PAID" as any },
@@ -328,19 +350,15 @@ router.post(
           },
         });
 
-        const transferAmount = slipResult.data?.amount || slipResult.data?.transAmount || null;
-        const transferFrom = slipResult.data?.sender?.name || slipResult.data?.sendingBank || null;
-        const transRef = slipResult.data?.transRef || null;
-
         console.log("=== WEB SLIP VERIFICATION COMPLETE - PAID ===");
 
         return res.json({
           success: true,
           invoiceNo: invoice.invoiceNo,
           roomNo: invoice.room?.roomNo ?? "-",
-          totalAmount: Number(invoice.totalAmount),
+          totalAmount: invoiceAmount,
           slipData: {
-            transferAmount: transferAmount ? Number(transferAmount) : null,
+            transferAmount: transferAmount || null,
             transferFrom,
             transRef,
           },
