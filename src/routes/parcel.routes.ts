@@ -114,8 +114,7 @@ router.post("/create", async (req, res) => {
                         `📦 แจ้งเตือนพัสดุ\n` +
                         `ห้อง: ${roomInfo?.roomNo ?? "-"}\n` +
                         (trackingNo ? `เลขพัสดุ: ${trackingNo}\n` : "") +
-                        (carrier ? `ขนส่ง: ${carrier}\n` : "") +
-                        (senderName ? `ผู้ส่ง: ${senderName}\n` : "") +
+                        (note ? `📝 ${note}\n` : "") +
                         `กรุณามารับพัสดุที่ห้องพัก`;
                     await pushLineMessage(lineAccount.lineUserId, msg, uploadedImageUrl);
                 }

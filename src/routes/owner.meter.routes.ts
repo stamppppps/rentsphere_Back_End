@@ -11,6 +11,12 @@ router.use(authRequired, requireRole(["OWNER"]));
    Helpers
 ========================= */
 
+function getMonthStart(date: Date) {
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 0, 0, 0, 0)
+  );
+}
+
 function parseMonthInput(raw: any) {
   const s = String(raw ?? "").trim();
 
@@ -37,9 +43,7 @@ function parseMonthInput(raw: any) {
 }
 
 function getMonthRange(date: Date) {
-  const start = new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 0, 0, 0, 0)
-  );
+  const start = getMonthStart(date);
   const next = new Date(
     Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1, 0, 0, 0, 0)
   );
@@ -131,32 +135,22 @@ async function assertOwnerCondoOrThrow(ownerId: string, condoId: string) {
 }
 
 async function findOrCreateCycleForMonth(condoId: string, targetMonth: Date) {
-  const { start, next } = getMonthRange(targetMonth);
+  const start = getMonthStart(targetMonth);
 
-  let cycle = await prisma.meterCycle.findFirst({
+  return prisma.meterCycle.upsert({
     where: {
-      condoId,
-      cycleMonth: {
-        gte: start,
-        lt: next,
-      },
-    },
-    orderBy: {
-      cycleMonth: "asc",
-    },
-  });
-
-  if (!cycle) {
-    cycle = await prisma.meterCycle.create({
-      data: {
+      condoId_cycleMonth: {
         condoId,
         cycleMonth: start,
-        openedAt: new Date(),
       },
-    });
-  }
-
-  return cycle;
+    },
+    update: {},
+    create: {
+      condoId,
+      cycleMonth: start,
+      openedAt: new Date(),
+    },
+  });
 }
 
 async function findPreviousReading(roomId: string, currentCycleMonth: Date) {
@@ -373,7 +367,9 @@ router.post("/rooms/:roomId/meters", async (req, res) => {
             waterUnits,
             waterSetting.billingType,
             Number(waterSetting.rate),
-            waterSetting.minimumCharge == null ? null : Number(waterSetting.minimumCharge)
+            waterSetting.minimumCharge == null
+              ? null
+              : Number(waterSetting.minimumCharge)
           )
         : 0;
 
@@ -382,7 +378,9 @@ router.post("/rooms/:roomId/meters", async (req, res) => {
             electricUnits,
             electricSetting.billingType,
             Number(electricSetting.rate),
-            electricSetting.minimumCharge == null ? null : Number(electricSetting.minimumCharge)
+            electricSetting.minimumCharge == null
+              ? null
+              : Number(electricSetting.minimumCharge)
           )
         : 0;
 

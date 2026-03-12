@@ -129,6 +129,15 @@ type PreviewItem = {
   facilityBookingId?: string | null;
 };
 
+type MeterSummary = {
+  prevWater: number;
+  currWater: number;
+  waterUnits: number;
+  prevElectric: number;
+  currElectric: number;
+  electricUnits: number;
+};
+
 type RoomPreview = {
   roomId: string;
   roomNo: string;
@@ -137,6 +146,7 @@ type RoomPreview = {
   subtotal: number;
   totalAmount: number;
   meterReadingId: string | null;
+  meterSummary: MeterSummary | null;
 };
 
 type PreviewRoomInput = {
@@ -284,6 +294,7 @@ async function getMeterItemsForRoom(
 ): Promise<{
   items: PreviewItem[];
   meterReadingId: string | null;
+  meterSummary: MeterSummary | null;
 }> {
   if (!cycleId) {
     if (requireMeter) {
@@ -291,7 +302,7 @@ async function getMeterItemsForRoom(
       err.status = 400;
       throw err;
     }
-    return { items: [], meterReadingId: null };
+    return { items: [], meterReadingId: null, meterSummary: null };
   }
 
   const reading = await prisma.meterReading.findUnique({
@@ -305,6 +316,14 @@ async function getMeterItemsForRoom(
       id: true,
       waterCharge: true,
       electricCharge: true,
+
+      // ===== สำหรับหน้า preview / ออกบิล =====
+      prevWater: true,
+      currWater: true,
+      waterUnits: true,
+      prevElectric: true,
+      currElectric: true,
+      electricUnits: true,
     },
   });
 
@@ -314,11 +333,19 @@ async function getMeterItemsForRoom(
       err.status = 400;
       throw err;
     }
-    return { items: [], meterReadingId: null };
+    return { items: [], meterReadingId: null, meterSummary: null };
   }
 
   return {
     meterReadingId: reading.id,
+    meterSummary: {
+      prevWater: toNumber(reading.prevWater),
+      currWater: toNumber(reading.currWater),
+      waterUnits: toNumber(reading.waterUnits),
+      prevElectric: toNumber(reading.prevElectric),
+      currElectric: toNumber(reading.currElectric),
+      electricUnits: toNumber(reading.electricUnits),
+    },
     items: [
       {
         itemType: "WATER" as InvoiceItemType,
@@ -366,6 +393,7 @@ async function buildPreviewForRoom(args: {
     subtotal,
     totalAmount,
     meterReadingId: meter.meterReadingId,
+    meterSummary: meter.meterSummary,
   };
 }
 
@@ -424,6 +452,7 @@ router.get("/condos/:condoId/invoices/generate-preview", async (req: any, res) =
         subtotal: r.subtotal,
         totalAmount: r.totalAmount,
         items: r.items,
+        meterSummary: r.meterSummary,
       })),
       summary: {
         roomCount: previews.length,
@@ -521,7 +550,9 @@ router.post("/condos/:condoId/invoices/generate", async (req: any, res) => {
         });
 
         if (existing && existing.status !== InvoiceStatus.DRAFT && !overwriteDraft) {
-          const err: any = new Error(`ห้อง ${room.roomNo} มีใบแจ้งหนี้ที่ไม่ใช่ DRAFT อยู่แล้ว`);
+          const err: any = new Error(
+            `ห้อง ${room.roomNo} มีใบแจ้งหนี้ที่ไม่ใช่ DRAFT อยู่แล้ว`
+          );
           err.status = 400;
           throw err;
         }
@@ -652,7 +683,10 @@ router.post("/condos/:condoId/invoices/generate", async (req: any, res) => {
       count: createdInvoices.length,
       invoices: createdInvoices,
       summary: {
-        totalAmount: createdInvoices.reduce((sum, item) => sum + item.totalAmount, 0),
+        totalAmount: createdInvoices.reduce(
+          (sum, item) => sum + item.totalAmount,
+          0
+        ),
       },
     });
   } catch (e: any) {
@@ -720,7 +754,10 @@ router.get("/condos/:condoId/invoices", async (req: any, res) => {
       })),
       summary: {
         count: invoices.length,
-        totalAmount: invoices.reduce((sum, inv) => sum + toNumber(inv.totalAmount), 0),
+        totalAmount: invoices.reduce(
+          (sum, inv) => sum + toNumber(inv.totalAmount),
+          0
+        ),
       },
     });
   } catch (e: any) {

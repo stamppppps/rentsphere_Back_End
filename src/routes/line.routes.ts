@@ -8,7 +8,7 @@ const router = Router();
    Helpers
    ========================================================= */
 function isLineSignatureValid(bodyText: string, signature: string | undefined) {
-  const secret = process.env.LINE_CHANNEL_SECRET;
+  const secret = process.env.LINE_CHANNEL_SECRET || process.env.LINE_MESSAGING_CHANNEL_SECRET;
   if (!secret || !signature) return false;
 
   const hash = crypto
@@ -23,7 +23,7 @@ async function replyMessage(
   replyToken: string,
   messages: Array<{ type: "text"; text: string }>
 ) {
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN || process.env.LINE_MESSAGING_ACCESS_TOKEN;
   if (!token) throw new Error("Missing LINE_CHANNEL_ACCESS_TOKEN");
 
   const res = await fetch("https://api.line.me/v2/bot/message/reply", {
@@ -49,64 +49,10 @@ function normalizeCode(text: string) {
 }
 
 /* =========================================================
-   SlipOK Helper
+   SlipOK Helper (shared)
    ========================================================= */
-async function verifySlipWithSlipOK(imageBuffer: Buffer): Promise<{
-  success: boolean;
-  data?: any;
-  error?: string;
-}> {
-  const apiKey = process.env.SLIPOK_API_KEY;
-  const branchId = process.env.SLIPOK_BRANCH_ID;
+import { verifySlipWithSlipOK } from "../utils/slipok.js";
 
-  if (!apiKey || !branchId) {
-    return { success: false, error: "SlipOK ไม่ได้ตั้งค่า" };
-  }
-
-  try {
-    const formData = new FormData();
-    const blob = new Blob([new Uint8Array(imageBuffer)], { type: "image/jpeg" });
-    formData.append("files", blob, "slip.jpg");
-
-    const res = await fetch(`https://api.slipok.com/api/line/apikey/${branchId}`, {
-      method: "POST",
-      headers: {
-        "x-authorization": apiKey,
-      },
-      body: formData,
-    });
-
-    const json = await res.json();
-    console.log("SlipOK FULL response:", JSON.stringify(json, null, 2));
-
-    // Extract data from various response shapes
-    const d = json?.data?.data || json?.data || json;
-
-    // Check if there is any transaction data at all — if yes, the slip is valid
-    const hasTransactionData = d && (
-      d.transRef || d.amount || d.transAmount ||
-      d.sender?.name || d.receiver?.name ||
-      d.sendingBank || d.receivingBank
-    );
-
-    if (hasTransactionData) {
-      console.log("SlipOK: slip has valid transaction data — accepting");
-      return { success: true, data: d };
-    }
-
-    // Fallback: check explicit success flags
-    if (json?.data?.success || json?.success) {
-      return { success: true, data: json.data || json };
-    }
-
-    const errMsg = json?.data?.message || json?.message || "ตรวจ slip ไม่สำเร็จ";
-    console.log("SlipOK: no transaction data found, error:", errMsg);
-    return { success: false, data: json, error: errMsg };
-  } catch (err: any) {
-    console.error("SlipOK error:", err);
-    return { success: false, error: err?.message || "SlipOK error" };
-  }
-}
 
 async function downloadLineImage(messageId: string): Promise<Buffer | null> {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN || process.env.LINE_MESSAGING_ACCESS_TOKEN;
@@ -146,7 +92,7 @@ router.post("/webhook", async (req: any, res) => {
     const body = req.body ?? {};
     const events = Array.isArray(body.events) ? body.events : [];
 
-    if (process.env.LINE_CHANNEL_SECRET && signature) {
+    if ((process.env.LINE_CHANNEL_SECRET || process.env.LINE_MESSAGING_CHANNEL_SECRET) && signature) {
       const ok = isLineSignatureValid(rawBody, signature);
       if (!ok) {
         return res.status(401).send("Invalid signature");

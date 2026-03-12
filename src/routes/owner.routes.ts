@@ -2207,16 +2207,14 @@ router.get("/condos/:condoId/rooms", async (req, res) => {
     const rooms = await prisma.room.findMany({
       where: { condoId },
       orderBy: [{ floor: "asc" }, { roomNo: "asc" }],
-      select: {
-        id: true,
-        floor: true,
-        roomNo: true,
-        rentPrice: true,
-        isActive: true,
-        occupancyStatus: true,
-        roomStatus: true,
+      include: {
         extraChargeAssignments: {
           select: { serviceId: true },
+        },
+        residencies: {
+          where: { status: "ACTIVE" },
+          take: 1,
+          select: { tenant: { select: { name: true } } },
         },
       },
     });
@@ -2227,6 +2225,7 @@ router.get("/condos/:condoId/rooms", async (req, res) => {
           new Set((r.extraChargeAssignments ?? []).map((x) => x.serviceId).filter(Boolean))
         );
 
+        const tenantName = (r as any).residencies?.[0]?.tenant?.name || null;
         return {
           id: r.id,
           floor: r.floor,
@@ -2237,6 +2236,7 @@ router.get("/condos/:condoId/rooms", async (req, res) => {
           roomStatus: r.roomStatus,
           serviceId: serviceIds[0] ?? null,
           serviceIds,
+          tenantName,
         };
       })
     );
@@ -2511,6 +2511,32 @@ router.patch("/condos/:condoId/rooms/:roomId", async (req, res) => {
     console.error("UPDATE ROOM ERROR:", err);
     if (err?.code === "P2002") return res.status(409).json({ error: "Duplicate roomNo" });
     return res.status(500).json({ error: "Failed to update room" });
+  }
+});
+
+/* =========================
+   DELETE /owner/condos/:condoId  —  ลบคอนโดทั้งหมด
+   ========================= */
+router.delete("/condos/:condoId", async (req: any, res) => {
+  try {
+    const ownerId = req.user?.id;
+    if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
+
+    const condoId = String(req.params.condoId);
+
+    // Verify ownership
+    const condo = await prisma.condo.findFirst({
+      where: { id: condoId, ownerUserId: ownerId },
+      select: { id: true, nameTh: true },
+    });
+    if (!condo) return res.status(403).json({ error: "Forbidden (not your condo)" });
+
+    await prisma.condo.delete({ where: { id: condoId } });
+
+    return res.json({ ok: true, message: `ลบคอนโด "${condo.nameTh}" เรียบร้อย` });
+  } catch (err: any) {
+    console.error("DELETE CONDO ERROR:", err);
+    return res.status(500).json({ error: err?.message ?? "ลบคอนโดไม่สำเร็จ" });
   }
 });
 
