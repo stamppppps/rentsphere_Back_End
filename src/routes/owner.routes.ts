@@ -2,7 +2,7 @@
 import { Prisma } from "@prisma/client";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
 import { authRequired } from "../middlewares/auth.js";
 import { requireRole } from "../middlewares/requireRole.js";
 import { uploadMemory } from "../middlewares/uploadMemory.js";
@@ -12,7 +12,7 @@ import { sendStaffInviteEmail } from "../utils/mailer.js";
 
 const router = Router();
 
-router.use(authRequired, requireRole(["OWNER"]));
+router.use(authRequired);
 
 /* =========================
    Permission helpers
@@ -20,15 +20,13 @@ router.use(authRequired, requireRole(["OWNER"]));
 const DEFAULT_PERMISSION_MODULES = [
   "DASHBOARD",
   "ROOMS",
+  "REPAIR",
+  "PARCEL",
+  "FACILITY",
+  "METER",
   "BILLING",
   "PAYMENT",
-  "PARCEL",
-  "REPAIR",
-  "FACILITY",
-  "ANNOUNCE",
-  "CHAT",
-  "STAFF",
-  "TENANT",
+  "REPORTS",
 ] as const;
 
 type PermissionModuleStr = (typeof DEFAULT_PERMISSION_MODULES)[number];
@@ -55,11 +53,13 @@ async function assertOwnerCondoOrThrow(ownerId: string, condoId: string) {
     where: { id: condoId, ownerUserId: ownerId },
     select: { id: true, nameTh: true },
   });
+
   if (!condo) {
     const err: any = new Error("Forbidden (not your condo)");
     err.status = 403;
     throw err;
   }
+
   return condo;
 }
 
@@ -75,7 +75,10 @@ async function getAllowedModulesForMembership(membershipId: string) {
   return overrides.map((x) => x.permission.module);
 }
 
-async function replaceMembershipOverrides(membershipId: string, modules: PermissionModuleStr[]) {
+async function replaceMembershipOverrides(
+  membershipId: string,
+  modules: PermissionModuleStr[]
+) {
   await prisma.staffPermissionOverride.deleteMany({ where: { membershipId } });
   if (modules.length === 0) return;
 
@@ -83,6 +86,7 @@ async function replaceMembershipOverrides(membershipId: string, modules: Permiss
     where: { code: { in: modules.map((m) => `${m}_ACCESS`) } },
     select: { id: true, code: true },
   });
+
   const map = new Map(perms.map((p) => [p.code, p.id]));
 
   await prisma.staffPermissionOverride.createMany({
@@ -93,10 +97,87 @@ async function replaceMembershipOverrides(membershipId: string, modules: Permiss
         allowed: true,
       }))
       .filter(
-        (x): x is { permissionId: string; membershipId: string; allowed: boolean } =>
-          Boolean(x.permissionId)
+        (
+          x
+        ): x is {
+          permissionId: string;
+          membershipId: string;
+          allowed: boolean;
+        } => Boolean(x.permissionId)
       ),
   });
+}
+
+function requireAnyStaffModule(
+  modules: PermissionModuleStr[]
+): RequestHandler {
+  return async (req: any, res, next) => {
+    try {
+      const user = req.user;
+
+      if (!user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      if (user.role === "OWNER" || user.role === "ADMIN") {
+        return next();
+      }
+
+      if (user.role !== "STAFF") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const condoId = String(
+        req.params.condoId || req.query.condoId || req.body?.condoId || ""
+      ).trim();
+
+      if (!condoId) {
+        return res.status(400).json({ error: "condoId is required" });
+      }
+
+      const membership = await prisma.staffMembership.findFirst({
+        where: {
+          staffUserId: user.id,
+          condoId,
+          isActive: true,
+        },
+        select: {
+          id: true,
+          permissionOverrides: {
+            where: { allowed: true },
+            select: {
+              permission: {
+                select: {
+                  module: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!membership) {
+        return res.status(403).json({ error: "No condo access" });
+      }
+
+      const allowedModules = membership.permissionOverrides.map(
+        (x) => x.permission.module
+      );
+
+      const ok = modules.some((m) => allowedModules.includes(m as any));
+      if (!ok) {
+        return res.status(403).json({ error: "No permission" });
+      }
+
+      req.staffMembershipId = membership.id;
+      req.allowedModules = allowedModules;
+      req.condoId = condoId;
+
+      return next();
+    } catch (error) {
+      return next(error);
+    }
+  };
 }
 
 router.get("/me", async (req, res) => {
@@ -548,182 +629,188 @@ router.put("/condos/:condoId", async (req, res) => {
 /* =========================
    GET /owner/condos/:condoId
    ========================= */
-router.get("/condos/:condoId/dashboard", async (req, res) => {
-  try {
-    const ownerId = (req as any).user?.id;
-    if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
+router.get(
+  "/condos/:condoId/dashboard",
+  requireRole(["OWNER", "ADMIN", "STAFF"]),
+  requireAnyStaffModule(["DASHBOARD"]),
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user?.id) return res.status(401).json({ error: "Unauthorized" });
 
-    const condoId = String(req.params.condoId);
+      const condoId = String(req.params.condoId);
 
-    const condo = await prisma.condo.findFirst({
-      where: { id: condoId, ownerUserId: ownerId },
-      select: {
-        id: true,
-        nameTh: true,
-        nameEn: true,
-        rooms: {
-          select: {
-            id: true,
-            isActive: true,
-            occupancyStatus: true,
-            rentPrice: true,
-          },
-        },
-      },
-    });
+      const condo =
+        user.role === "STAFF"
+          ? await prisma.condo.findFirst({
+              where: { id: condoId },
+              select: {
+                id: true,
+                nameTh: true,
+                nameEn: true,
+                rooms: {
+                  select: {
+                    id: true,
+                    isActive: true,
+                    occupancyStatus: true,
+                    rentPrice: true,
+                  },
+                },
+              },
+            })
+          : await prisma.condo.findFirst({
+              where: { id: condoId, ownerUserId: user.id },
+              select: {
+                id: true,
+                nameTh: true,
+                nameEn: true,
+                rooms: {
+                  select: {
+                    id: true,
+                    isActive: true,
+                    occupancyStatus: true,
+                    rentPrice: true,
+                  },
+                },
+              },
+            });
 
-    if (!condo) {
-      return res.status(404).json({ error: "Condo not found" });
-    }
+      if (!condo) {
+        return res.status(404).json({ error: "Condo not found" });
+      }
 
-    const rooms = condo.rooms ?? [];
+      const rooms = condo.rooms ?? [];
 
-    const roomsTotal = rooms.length;
-    const roomsActive = rooms.filter((r) => r.isActive).length;
-    const occupiedRooms = rooms.filter(
-      (r) => r.isActive && r.occupancyStatus === "OCCUPIED"
-    ).length;
-    const vacantRooms = rooms.filter(
-      (r) => r.isActive && r.occupancyStatus === "VACANT"
-    ).length;
+      const roomsTotal = rooms.length;
+      const roomsActive = rooms.filter((r) => r.isActive).length;
+      const occupiedRooms = rooms.filter(
+        (r) => r.isActive && r.occupancyStatus === "OCCUPIED"
+      ).length;
+      const vacantRooms = rooms.filter(
+        (r) => r.isActive && r.occupancyStatus === "VACANT"
+      ).length;
 
-    const activeRoomsForAvg = rooms.filter((r) => r.isActive);
-    const avgRentPrice =
-      activeRoomsForAvg.length === 0
-        ? 0
-        : Math.round(
-            activeRoomsForAvg.reduce(
-              (sum, r) => sum + Number(r.rentPrice ?? 0),
-              0
-            ) / activeRoomsForAvg.length
-          );
+      const activeRoomsForAvg = rooms.filter((r) => r.isActive);
+      const avgRentPrice =
+        activeRoomsForAvg.length === 0
+          ? 0
+          : Math.round(
+              activeRoomsForAvg.reduce(
+                (sum, r) => sum + Number(r.rentPrice ?? 0),
+                0
+              ) / activeRoomsForAvg.length
+            );
 
-    function classifyInvoiceItemType(itemType: string) {
-      const t = String(itemType ?? "").toUpperCase();
+      function classifyInvoiceItemType(itemType: string) {
+        const t = String(itemType ?? "").toUpperCase();
 
-      if (t === "RENT") return "RENT";
-      if (t === "ELECTRIC") return "ELECTRIC";
-      if (t === "WATER") return "WATER";
-
-      if (
-        t === "CHARGE" ||
-        t === "EXTRA" ||
-        t === "FACILITY" ||
-        t === "OTHER" ||
-        t === "PENALTY" ||
-        t === "DISCOUNT"
-      ) {
+        if (t === "RENT") return "RENT";
+        if (t === "ELECTRIC") return "ELECTRIC";
+        if (t === "WATER") return "WATER";
         return "OTHER";
       }
 
-      return "OTHER";
-    }
+      const now = new Date();
+      const monthLabels: string[] = [];
+      const monthKeys: string[] = [];
 
-    const now = new Date();
-    const monthLabels: string[] = [];
-    const monthKeys: string[] = [];
+      for (let i = 11; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const mm = String(d.getMonth() + 1).padStart(2, "0");
+        const yyyy = d.getFullYear();
 
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const mm = String(d.getMonth() + 1).padStart(2, "0");
-      const yyyy = d.getFullYear();
+        monthLabels.push(`${mm}-${yyyy}`);
+        monthKeys.push(`${yyyy}-${mm}`);
+      }
 
-      monthLabels.push(`${mm}-${yyyy}`);
-      monthKeys.push(`${yyyy}-${mm}`);
-    }
+      const labels = monthLabels;
 
-    const labels = monthLabels;
+      const invoices = Array(12).fill(0);
+      const receipts = Array(12).fill(0);
+      const rent = Array(12).fill(0);
+      const elec = Array(12).fill(0);
+      const water = Array(12).fill(0);
+      const other = Array(12).fill(0);
 
-    const invoices = Array(12).fill(0);
-    const receipts = Array(12).fill(0);
-    const rent = Array(12).fill(0);
-    const elec = Array(12).fill(0);
-    const water = Array(12).fill(0);
-    const other = Array(12).fill(0);
+      const startDate = new Date(now.getFullYear(), now.getMonth() - 11, 1);
 
-    const startDate = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-
-    const invoiceRows = await prisma.invoice.findMany({
-      where: {
-        condoId,
-        billingMonth: {
-          gte: startDate,
-        },
-      },
-      select: {
-        id: true,
-        billingMonth: true,
-        status: true,
-        totalAmount: true,
-        items: {
-          select: {
-            itemType: true,
-            amount: true,
+      const invoiceRows = await prisma.invoice.findMany({
+        where: {
+          condoId,
+          billingMonth: {
+            gte: startDate,
           },
         },
-      },
-      orderBy: {
-        billingMonth: "asc",
-      },
-    });
+        select: {
+          id: true,
+          billingMonth: true,
+          status: true,
+          totalAmount: true,
+          items: {
+            select: {
+              itemType: true,
+              amount: true,
+            },
+          },
+        },
+        orderBy: {
+          billingMonth: "asc",
+        },
+      });
 
-    for (const inv of invoiceRows) {
-      const d = new Date(inv.billingMonth);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      const idx = monthKeys.indexOf(key);
-      if (idx === -1) continue;
+      for (const inv of invoiceRows) {
+        const d = new Date(inv.billingMonth);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        const idx = monthKeys.indexOf(key);
+        if (idx === -1) continue;
 
-      invoices[idx] += 1;
+        invoices[idx] += 1;
 
-      if (inv.status === "PAID") {
-        receipts[idx] += 1;
-      }
-
-      if (inv.items && inv.items.length > 0) {
-        for (const item of inv.items) {
-          const amt = Number(item.amount ?? 0);
-          const bucket = classifyInvoiceItemType(String(item.itemType ?? ""));
-
-          if (bucket === "RENT") {
-            rent[idx] += amt;
-          } else if (bucket === "ELECTRIC") {
-            elec[idx] += amt;
-          } else if (bucket === "WATER") {
-            water[idx] += amt;
-          } else {
-            other[idx] += amt;
-          }
+        if (inv.status === "PAID") {
+          receipts[idx] += 1;
         }
-      } else {
-        rent[idx] += Number(inv.totalAmount ?? 0);
-      }
-    }
 
-    return res.json({
-      summary: {
-        condoId: condo.id,
-        condoName: condo.nameTh ?? condo.nameEn ?? "—",
-        roomsTotal,
-        roomsActive,
-        occupiedRooms,
-        vacantRooms,
-        avgRentPrice,
-      },
-      series12: {
-        labels,
-        invoices,
-        receipts,
-        rent,
-        elec,
-        water,
-        other,
-      },
-    });
-  } catch (err: any) {
-    console.error("GET DASHBOARD ERROR:", err);
-    return res.status(500).json({ error: "Failed to fetch dashboard" });
+        if (inv.items && inv.items.length > 0) {
+          for (const item of inv.items) {
+            const amt = Number(item.amount ?? 0);
+            const bucket = classifyInvoiceItemType(String(item.itemType ?? ""));
+
+            if (bucket === "RENT") rent[idx] += amt;
+            else if (bucket === "ELECTRIC") elec[idx] += amt;
+            else if (bucket === "WATER") water[idx] += amt;
+            else other[idx] += amt;
+          }
+        } else {
+          rent[idx] += Number(inv.totalAmount ?? 0);
+        }
+      }
+
+      return res.json({
+        summary: {
+          condoId: condo.id,
+          condoName: condo.nameTh ?? condo.nameEn ?? "—",
+          roomsTotal,
+          roomsActive,
+          occupiedRooms,
+          vacantRooms,
+          avgRentPrice,
+        },
+        series12: {
+          labels,
+          invoices,
+          receipts,
+          rent,
+          elec,
+          water,
+          other,
+        },
+      });
+    } catch (err: any) {
+      console.error("GET DASHBOARD ERROR:", err);
+      return res.status(500).json({ error: "Failed to fetch dashboard" });
+    }
   }
-});
+);
 
 /* =========================
    (Step4) Floor/Room config
@@ -823,41 +910,53 @@ router.put("/condos/:condoId/floor-config", async (req, res) => {
 
 
 // GET /owner/condos/:condoId/invoices
-router.get("/condos/:condoId/invoices", async (req, res) => {
-  try {
-    const ownerId = (req as any).user?.id;
-    if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
+router.get(
+  "/condos/:condoId/invoices",
+  requireRole(["OWNER", "ADMIN", "STAFF"]),
+  requireAnyStaffModule(["PAYMENT", "BILLING"]),
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user?.id) return res.status(401).json({ error: "Unauthorized" });
 
-    const condoId = String(req.params.condoId);
-    await assertOwnerCondoOrThrow(ownerId, condoId);
+      const condoId = String(req.params.condoId);
 
-    const invoices = await prisma.invoice.findMany({
-      where: { condoId },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-      select: {
-        id: true,
-        roomId: true,
-        status: true,
-        totalAmount: true,
-        createdAt: true,
-      },
-    });
+      if (user.role !== "STAFF") {
+        await assertOwnerCondoOrThrow(user.id, condoId);
+      }
 
-    return res.json({
-      invoices: invoices.map((iv) => ({
-        id: iv.id,
-        roomId: iv.roomId,
-        status: iv.status,
-        totalAmount: Number(iv.totalAmount ?? 0),
-        createdAt: iv.createdAt,
-      })),
-    });
-  } catch (err: any) {
-    console.error("CONDO INVOICES ERROR:", err);
-    return res.json({ invoices: [] });
+      const invoices = await prisma.invoice.findMany({
+        where: { condoId },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+        select: {
+          id: true,
+          roomId: true,
+          status: true,
+          totalAmount: true,
+          createdAt: true,
+          invoiceNo: true,
+          billingMonth: true,
+        },
+      });
+
+      return res.json({
+        invoices: invoices.map((iv) => ({
+          id: iv.id,
+          roomId: iv.roomId,
+          status: iv.status,
+          totalAmount: Number(iv.totalAmount ?? 0),
+          createdAt: iv.createdAt,
+          invoiceNo: iv.invoiceNo,
+          billingMonth: iv.billingMonth,
+        })),
+      });
+    } catch (err: any) {
+      console.error("CONDO INVOICES ERROR:", err);
+      return res.status(err?.status ?? 500).json({ invoices: [] });
+    }
   }
-});
+);
 
 // POST /owner/condos/:condoId/invoices  — create a new invoice
 router.post("/condos/:condoId/invoices", async (req, res) => {
@@ -2194,57 +2293,72 @@ router.post("/condos/:condoId/rooms", async (req, res) => {
 /* =========================
    GET /owner/condos/:condoId/rooms
    ========================= */
-router.get("/condos/:condoId/rooms", async (req, res) => {
-  try {
-    const ownerId = (req as any).user?.id;
-    if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
+router.get(
+  "/condos/:condoId/rooms",
+  requireRole(["OWNER", "ADMIN", "STAFF"]),
+  requireAnyStaffModule(["ROOMS", "PAYMENT", "BILLING", "METER"]),
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user?.id) return res.status(401).json({ error: "Unauthorized" });
 
-    const condoId = String(req.params.condoId);
+      const condoId = String(req.params.condoId);
 
-    const condo = await assertOwnerCondo(ownerId, condoId);
-    if (!condo) return res.status(403).json({ error: "Forbidden (not your condo)" });
+      if (user.role !== "STAFF") {
+        const condo = await assertOwnerCondo(user.id, condoId);
+        if (!condo) {
+          return res.status(403).json({ error: "Forbidden (not your condo)" });
+        }
+      }
 
-    const rooms = await prisma.room.findMany({
-      where: { condoId },
-      orderBy: [{ floor: "asc" }, { roomNo: "asc" }],
-      include: {
-        extraChargeAssignments: {
-          select: { serviceId: true },
+      const rooms = await prisma.room.findMany({
+        where: { condoId },
+        orderBy: [{ floor: "asc" }, { roomNo: "asc" }],
+        include: {
+          extraChargeAssignments: {
+            select: { serviceId: true },
+          },
+          residencies: {
+            where: { status: "ACTIVE" },
+            take: 1,
+            select: { tenant: { select: { name: true } } },
+          },
         },
-        residencies: {
-          where: { status: "ACTIVE" },
-          take: 1,
-          select: { tenant: { select: { name: true } } },
-        },
-      },
-    });
+      });
 
-    return res.json(
-      rooms.map((r) => {
-        const serviceIds = Array.from(
-          new Set((r.extraChargeAssignments ?? []).map((x) => x.serviceId).filter(Boolean))
-        );
+      return res.json(
+        rooms.map((r) => {
+          const serviceIds = Array.from(
+            new Set(
+              (r.extraChargeAssignments ?? [])
+                .map((x) => x.serviceId)
+                .filter(Boolean)
+            )
+          );
 
-        const tenantName = (r as any).residencies?.[0]?.tenant?.name || null;
-        return {
-          id: r.id,
-          floor: r.floor,
-          roomNo: r.roomNo,
-          price: Number(r.rentPrice),
-          isActive: r.isActive,
-          occupancyStatus: r.occupancyStatus,
-          roomStatus: r.roomStatus,
-          serviceId: serviceIds[0] ?? null,
-          serviceIds,
-          tenantName,
-        };
-      })
-    );
-  } catch (err: any) {
-    console.error("LIST ROOMS ERROR:", err);
-    return res.status(500).json({ error: "Failed to fetch rooms" });
+          const tenantName = (r as any).residencies?.[0]?.tenant?.name || null;
+
+          return {
+            id: r.id,
+            floor: r.floor,
+            roomNo: r.roomNo,
+            price: Number(r.rentPrice),
+            rentPrice: Number(r.rentPrice),
+            isActive: r.isActive,
+            occupancyStatus: r.occupancyStatus,
+            roomStatus: r.roomStatus,
+            serviceId: serviceIds[0] ?? null,
+            serviceIds,
+            tenantName,
+          };
+        })
+      );
+    } catch (err: any) {
+      console.error("LIST ROOMS ERROR:", err);
+      return res.status(err?.status ?? 500).json({ error: "Failed to fetch rooms" });
+    }
   }
-});
+);
 
 // =========================
 // GET /owner/rooms/:roomId  (RoomDetailPage)
@@ -2691,27 +2805,36 @@ router.delete("/condos/:condoId/services/:serviceId", async (req, res) => {
 /* =========================
    Utilities (Water/Electric billing)
    ========================= */
-router.get("/condos/:condoId/utilities", async (req, res) => {
-  try {
-    const ownerId = (req as any).user?.id;
-    if (!ownerId) return res.status(401).json({ error: "Unauthorized" });
+router.get(
+  "/condos/:condoId/utilities",
+  requireRole(["OWNER", "ADMIN", "STAFF"]),
+  requireAnyStaffModule(["PAYMENT", "BILLING", "METER"]),
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user?.id) return res.status(401).json({ error: "Unauthorized" });
 
-    const condoId = String(req.params.condoId);
+      const condoId = String(req.params.condoId);
 
-    const condo = await assertOwnerCondo(ownerId, condoId);
-    if (!condo) return res.status(403).json({ error: "Forbidden (not your condo)" });
+      if (user.role !== "STAFF") {
+        const condo = await assertOwnerCondo(user.id, condoId);
+        if (!condo) {
+          return res.status(403).json({ error: "Forbidden (not your condo)" });
+        }
+      }
 
-    const list = await prisma.condoUtilitySetting.findMany({
-      where: { condoId },
-      orderBy: { createdAt: "asc" },
-    });
+      const list = await prisma.condoUtilitySetting.findMany({
+        where: { condoId },
+        orderBy: { createdAt: "asc" },
+      });
 
-    return res.json(list);
-  } catch (err: any) {
-    console.error("LIST UTILITIES ERROR:", err);
-    return res.status(500).json({ error: "Failed to fetch utilities" });
+      return res.json(list);
+    } catch (err: any) {
+      console.error("LIST UTILITIES ERROR:", err);
+      return res.status(err?.status ?? 500).json({ error: "Failed to fetch utilities" });
+    }
   }
-});
+);
 
 router.post("/condos/:condoId/utilities", async (req, res) => {
   try {

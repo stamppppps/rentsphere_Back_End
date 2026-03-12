@@ -10,6 +10,7 @@ import ownerMeterRoutes from "./owner.meter.routes.js";
 import ownerInvoiceRoutes from "./owner.invoice.routes.js";
 import ownerPaymentRoutes from "./owner.payment.routes.js";
 import tenantBillingRoutes from "./tenant.billing.routes.js";
+import staffAppRoutes from "./staff.app.routes.js";
 
 const router = Router();
 
@@ -26,4 +27,6 @@ router.use("/owner", ownerInvoiceRoutes);
 router.use("/owner", ownerPaymentRoutes);
 router.use("/tenant-billing", tenantBillingRoutes);
 
+// staff app permission test routes
+router.use("/staff-app", staffAppRoutes);
 export default router;

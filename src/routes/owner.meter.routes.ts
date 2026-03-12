@@ -1,11 +1,116 @@
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
 import { authRequired } from "../middlewares/auth.js";
 import { requireRole } from "../middlewares/requireRole.js";
 import { prisma } from "../prisma.js";
 
 const router = Router();
 
-router.use(authRequired, requireRole(["OWNER"]));
+router.use(authRequired);
+
+/* =========================
+   Permission helpers
+========================= */
+
+type PermissionModuleStr =
+  | "DASHBOARD"
+  | "ROOMS"
+  | "REPAIR"
+  | "PARCEL"
+  | "FACILITY"
+  | "METER"
+  | "BILLING"
+  | "PAYMENT"
+  | "REPORTS";
+
+function requireAnyStaffModule(
+  modules: PermissionModuleStr[]
+): RequestHandler {
+  return async (req: any, res, next) => {
+    try {
+      const user = req.user;
+
+      if (!user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      if (user.role === "OWNER" || user.role === "ADMIN") {
+        return next();
+      }
+
+      if (user.role !== "STAFF") {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const condoId = String(
+        req.params.condoId ||
+          req.query.condoId ||
+          req.body?.condoId ||
+          req.params.roomId ||
+          ""
+      ).trim();
+
+      if (!condoId && !req.params.roomId) {
+        return res.status(400).json({ error: "condoId is required" });
+      }
+
+      if (req.params.roomId && !req.params.condoId) {
+        const room = await prisma.room.findUnique({
+          where: { id: String(req.params.roomId) },
+          select: { condoId: true },
+        });
+
+        if (!room?.condoId) {
+          return res.status(404).json({ error: "Room not found" });
+        }
+
+        req.condoId = room.condoId;
+      } else {
+        req.condoId = String(req.params.condoId || req.query.condoId || req.body?.condoId || "").trim();
+      }
+
+      const membership = await prisma.staffMembership.findFirst({
+        where: {
+          staffUserId: user.id,
+          condoId: req.condoId,
+          isActive: true,
+        },
+        select: {
+          id: true,
+          permissionOverrides: {
+            where: { allowed: true },
+            select: {
+              permission: {
+                select: {
+                  module: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!membership) {
+        return res.status(403).json({ error: "No condo access" });
+      }
+
+      const allowedModules = membership.permissionOverrides.map(
+        (x) => x.permission.module
+      );
+
+      const ok = modules.some((m) => allowedModules.includes(m as any));
+      if (!ok) {
+        return res.status(403).json({ error: "No permission" });
+      }
+
+      req.staffMembershipId = membership.id;
+      req.allowedModules = allowedModules;
+
+      return next();
+    } catch (error) {
+      return next(error);
+    }
+  };
+}
 
 /* =========================
    Helpers
@@ -94,6 +199,11 @@ function mapReadingNumbers<T extends Record<string, any>>(r: T) {
 
 async function assertOwnerRoomOrThrow(req: any, roomId: string) {
   const ownerId = req.user?.id;
+  if (!ownerId) {
+    const err: any = new Error("Unauthorized");
+    err.status = 401;
+    throw err;
+  }
 
   const room = await prisma.room.findFirst({
     where: {
@@ -115,6 +225,84 @@ async function assertOwnerRoomOrThrow(req: any, roomId: string) {
     err.status = 403;
     throw err;
   }
+
+  return room;
+}
+
+async function assertReadableRoomOrThrow(req: any, roomId: string) {
+  const user = req.user;
+  if (!user?.id) {
+    const err: any = new Error("Unauthorized");
+    err.status = 401;
+    throw err;
+  }
+
+  if (user.role === "OWNER" || user.role === "ADMIN") {
+    return assertOwnerRoomOrThrow(req, roomId);
+  }
+
+  const room = await prisma.room.findUnique({
+    where: { id: roomId },
+    select: {
+      id: true,
+      condoId: true,
+      roomNo: true,
+      floor: true,
+      occupancyStatus: true,
+      roomStatus: true,
+    },
+  });
+
+  if (!room) {
+    const err: any = new Error("Room not found");
+    err.status = 404;
+    throw err;
+  }
+
+  const membership = await prisma.staffMembership.findFirst({
+    where: {
+      staffUserId: user.id,
+      condoId: room.condoId,
+      isActive: true,
+    },
+    select: {
+      id: true,
+      permissionOverrides: {
+        where: { allowed: true },
+        select: {
+          permission: {
+            select: { module: true },
+          },
+        },
+      },
+    },
+  });
+
+  if (!membership) {
+    const err: any = new Error("Forbidden");
+    err.status = 403;
+    throw err;
+  }
+
+  const allowedModules = membership.permissionOverrides.map(
+    (x) => x.permission.module
+  );
+
+  const ok =
+    allowedModules.includes("METER" as any) ||
+    allowedModules.includes("ROOMS" as any) ||
+    allowedModules.includes("BILLING" as any) ||
+    allowedModules.includes("PAYMENT" as any);
+
+  if (!ok) {
+    const err: any = new Error("Forbidden");
+    err.status = 403;
+    throw err;
+  }
+
+  req.staffMembershipId = membership.id;
+  req.allowedModules = allowedModules;
+  req.condoId = room.condoId;
 
   return room;
 }
@@ -175,348 +363,380 @@ async function findPreviousReading(roomId: string, currentCycleMonth: Date) {
    ROOM METER NUMBER
 ========================= */
 
-router.get("/rooms/:roomId/meter-numbers", async (req, res) => {
-  try {
-    const room = await assertOwnerRoomOrThrow(req, req.params.roomId);
+router.get(
+  "/rooms/:roomId/meter-numbers",
+  requireRole(["OWNER", "ADMIN", "STAFF"]),
+  requireAnyStaffModule(["METER", "ROOMS", "BILLING", "PAYMENT"]),
+  async (req, res) => {
+    try {
+      const room = await assertReadableRoomOrThrow(req, String(req.params.roomId));
 
-    const meter = await prisma.roomMeter.findUnique({
-      where: { roomId: room.id },
-    });
+      const meter = await prisma.roomMeter.findUnique({
+        where: { roomId: room.id },
+      });
 
-    res.json(
-      meter ?? {
-        waterMeterNo: null,
-        electricMeterNo: null,
-      }
-    );
-  } catch (e: any) {
-    console.error("GET METER NUMBERS ERROR:", e);
-    res.status(e.status ?? 500).json({ error: e.message });
+      res.json(
+        meter ?? {
+          waterMeterNo: null,
+          electricMeterNo: null,
+        }
+      );
+    } catch (e: any) {
+      console.error("GET METER NUMBERS ERROR:", e);
+      res.status(e.status ?? 500).json({ error: e.message });
+    }
   }
-});
+);
 
-router.put("/rooms/:roomId/meter-numbers", async (req, res) => {
-  try {
-    const room = await assertOwnerRoomOrThrow(req, req.params.roomId);
+router.put(
+  "/rooms/:roomId/meter-numbers",
+  requireRole(["OWNER"]),
+  async (req, res) => {
+    try {
+      const room = await assertReadableRoomOrThrow(req, String(req.params.roomId));
 
-    const { waterMeterNo, electricMeterNo } = req.body;
+      const { waterMeterNo, electricMeterNo } = req.body;
 
-    const saved = await prisma.roomMeter.upsert({
-      where: { roomId: room.id },
-      update: {
-        waterMeterNo: normalizeOptionalText(waterMeterNo),
-        electricMeterNo: normalizeOptionalText(electricMeterNo),
-      },
-      create: {
-        roomId: room.id,
-        waterMeterNo: normalizeOptionalText(waterMeterNo),
-        electricMeterNo: normalizeOptionalText(electricMeterNo),
-      },
-    });
+      const saved = await prisma.roomMeter.upsert({
+        where: { roomId: room.id },
+        update: {
+          waterMeterNo: normalizeOptionalText(waterMeterNo),
+          electricMeterNo: normalizeOptionalText(electricMeterNo),
+        },
+        create: {
+          roomId: room.id,
+          waterMeterNo: normalizeOptionalText(waterMeterNo),
+          electricMeterNo: normalizeOptionalText(electricMeterNo),
+        },
+      });
 
-    res.json(saved);
-  } catch (e: any) {
-    console.error("SAVE METER NUMBERS ERROR:", e);
-    res.status(e.status ?? 500).json({ error: e.message });
+      res.json(saved);
+    } catch (e: any) {
+      console.error("SAVE METER NUMBERS ERROR:", e);
+      res.status(e.status ?? 500).json({ error: e.message });
+    }
   }
-});
+);
 
 /* =========================
    GET CURRENT METER
 ========================= */
 
-router.get("/rooms/:roomId/meters", async (req, res) => {
-  try {
-    const room = await assertOwnerRoomOrThrow(req, req.params.roomId);
+router.get(
+  "/rooms/:roomId/meters",
+  requireRole(["OWNER", "ADMIN", "STAFF"]),
+  requireAnyStaffModule(["METER", "ROOMS", "BILLING", "PAYMENT"]),
+  async (req, res) => {
+    try {
+     const room = await assertReadableRoomOrThrow(req, String(req.params.roomId));
 
-    const month = parseMonthInput(req.query.month);
-    const cycle = await findOrCreateCycleForMonth(room.condoId, month);
+      const month = parseMonthInput(req.query.month);
+      const cycle = await findOrCreateCycleForMonth(room.condoId, month);
 
-    const reading = await prisma.meterReading.findUnique({
-      where: {
-        roomId_cycleId: {
-          roomId: room.id,
-          cycleId: cycle.id,
-        },
-      },
-    });
-
-    const prevReading = await findPreviousReading(room.id, cycle.cycleMonth);
-    const meter = await prisma.roomMeter.findUnique({
-      where: { roomId: room.id },
-    });
-
-    res.json({
-      month: cycle.cycleMonth,
-      cycleId: cycle.id,
-      cycleStatus: cycle.status,
-      room: {
-        id: room.id,
-        roomNo: room.roomNo,
-        floor: room.floor,
-        occupancyStatus: room.occupancyStatus,
-        roomStatus: room.roomStatus,
-      },
-      meter: meter ?? {
-        waterMeterNo: null,
-        electricMeterNo: null,
-      },
-      prevWater: Number(prevReading?.currWater ?? 0),
-      prevElectric: Number(prevReading?.currElectric ?? 0),
-      reading: reading
-        ? {
-            id: reading.id,
-            currWater: Number(reading.currWater ?? 0),
-            currElectric: Number(reading.currElectric ?? 0),
-            waterUnits: Number(reading.waterUnits ?? 0),
-            electricUnits: Number(reading.electricUnits ?? 0),
-            waterCharge: Number(reading.waterCharge ?? 0),
-            electricCharge: Number(reading.electricCharge ?? 0),
-            status: reading.status,
-            recordedAt: reading.recordedAt,
-            note: reading.note,
-          }
-        : null,
-    });
-  } catch (e: any) {
-    console.error("GET CURRENT METER ERROR:", e);
-    res.status(e.status ?? 500).json({ error: e.message });
-  }
-});
-
-/* =========================
-   SAVE METER READING
-========================= */
-
-router.post("/rooms/:roomId/meters", async (req, res) => {
-  try {
-    const room = await assertOwnerRoomOrThrow(req, req.params.roomId);
-
-    const { cycleId, month, currWater, currElectric, note } = req.body;
-
-    let cycle = null;
-
-    if (cycleId) {
-      cycle = await prisma.meterCycle.findFirst({
-        where: {
-          id: String(cycleId),
-          condoId: room.condoId,
-        },
-      });
-    } else {
-      const targetMonth = parseMonthInput(month);
-      cycle = await findOrCreateCycleForMonth(room.condoId, targetMonth);
-    }
-
-    if (!cycle) {
-      return res.status(400).json({ error: "cycleId or month is required" });
-    }
-
-    if (cycle.status === "CLOSED") {
-      return res.status(400).json({ error: "รอบบิลนี้ถูกปิดแล้ว" });
-    }
-
-    const safeCurrWater = Math.max(0, toSafeNumber(currWater));
-    const safeCurrElectric = Math.max(0, toSafeNumber(currElectric));
-    const safeNote = normalizeOptionalText(note);
-
-    const saved = await prisma.$transaction(async (tx) => {
-      const prevReading = await tx.meterReading.findFirst({
-        where: {
-          roomId: room.id,
-          cycle: {
-            cycleMonth: {
-              lt: cycle.cycleMonth,
-            },
-          },
-        },
-        orderBy: {
-          cycle: {
-            cycleMonth: "desc",
-          },
-        },
-      });
-
-      const prevWater = Number(prevReading?.currWater ?? 0);
-      const prevElectric = Number(prevReading?.currElectric ?? 0);
-
-      if (safeCurrWater < prevWater) {
-        const err: any = new Error("เลขมิเตอร์น้ำต้องไม่น้อยกว่าครั้งก่อน");
-        err.status = 400;
-        throw err;
-      }
-
-      if (safeCurrElectric < prevElectric) {
-        const err: any = new Error("เลขมิเตอร์ไฟต้องไม่น้อยกว่าครั้งก่อน");
-        err.status = 400;
-        throw err;
-      }
-
-      const waterUnits = Math.max(0, safeCurrWater - prevWater);
-      const electricUnits = Math.max(0, safeCurrElectric - prevElectric);
-
-      const settings = await tx.condoUtilitySetting.findMany({
-        where: { condoId: room.condoId },
-      });
-
-      const waterSetting = settings.find((s) => s.utilityType === "WATER");
-      const electricSetting = settings.find((s) => s.utilityType === "ELECTRIC");
-
-      const waterCharge = waterSetting
-        ? calcUtilityCharge(
-            waterUnits,
-            waterSetting.billingType,
-            Number(waterSetting.rate),
-            waterSetting.minimumCharge == null
-              ? null
-              : Number(waterSetting.minimumCharge)
-          )
-        : 0;
-
-      const electricCharge = electricSetting
-        ? calcUtilityCharge(
-            electricUnits,
-            electricSetting.billingType,
-            Number(electricSetting.rate),
-            electricSetting.minimumCharge == null
-              ? null
-              : Number(electricSetting.minimumCharge)
-          )
-        : 0;
-
-      return tx.meterReading.upsert({
+      const reading = await prisma.meterReading.findUnique({
         where: {
           roomId_cycleId: {
             roomId: room.id,
             cycleId: cycle.id,
           },
         },
-        update: {
-          prevWater,
-          prevElectric,
-          currWater: safeCurrWater,
-          currElectric: safeCurrElectric,
-          waterUnits,
-          electricUnits,
-          waterCharge,
-          electricCharge,
-          note: safeNote,
-          status: "SUBMITTED",
-          recordedBy: req.user?.id,
-          recordedAt: new Date(),
-        },
-        create: {
-          condoId: room.condoId,
-          roomId: room.id,
-          cycleId: cycle.id,
-          prevWater,
-          prevElectric,
-          currWater: safeCurrWater,
-          currElectric: safeCurrElectric,
-          waterUnits,
-          electricUnits,
-          waterCharge,
-          electricCharge,
-          note: safeNote,
-          status: "SUBMITTED",
-          recordedBy: req.user?.id,
-          recordedAt: new Date(),
-        },
       });
-    });
 
-    res.json({
-      id: saved.id,
-      cycleId: saved.cycleId,
-      roomId: saved.roomId,
-      prevWater: Number(saved.prevWater ?? 0),
-      currWater: Number(saved.currWater ?? 0),
-      prevElectric: Number(saved.prevElectric ?? 0),
-      currElectric: Number(saved.currElectric ?? 0),
-      waterUnits: Number(saved.waterUnits ?? 0),
-      electricUnits: Number(saved.electricUnits ?? 0),
-      waterCharge: Number(saved.waterCharge ?? 0),
-      electricCharge: Number(saved.electricCharge ?? 0),
-      status: saved.status,
-      recordedAt: saved.recordedAt,
-      note: saved.note,
-    });
-  } catch (e: any) {
-    console.error("SAVE METER ERROR:", e);
-    res.status(e.status ?? 500).json({ error: e.message });
+      const prevReading = await findPreviousReading(room.id, cycle.cycleMonth);
+      const meter = await prisma.roomMeter.findUnique({
+        where: { roomId: room.id },
+      });
+
+      res.json({
+        month: cycle.cycleMonth,
+        cycleId: cycle.id,
+        cycleStatus: cycle.status,
+        room: {
+          id: room.id,
+          roomNo: room.roomNo,
+          floor: room.floor,
+          occupancyStatus: room.occupancyStatus,
+          roomStatus: room.roomStatus,
+        },
+        meter: meter ?? {
+          waterMeterNo: null,
+          electricMeterNo: null,
+        },
+        prevWater: Number(prevReading?.currWater ?? 0),
+        prevElectric: Number(prevReading?.currElectric ?? 0),
+        reading: reading
+          ? {
+              id: reading.id,
+              currWater: Number(reading.currWater ?? 0),
+              currElectric: Number(reading.currElectric ?? 0),
+              waterUnits: Number(reading.waterUnits ?? 0),
+              electricUnits: Number(reading.electricUnits ?? 0),
+              waterCharge: Number(reading.waterCharge ?? 0),
+              electricCharge: Number(reading.electricCharge ?? 0),
+              status: reading.status,
+              recordedAt: reading.recordedAt,
+              note: reading.note,
+            }
+          : null,
+      });
+    } catch (e: any) {
+      console.error("GET CURRENT METER ERROR:", e);
+      res.status(e.status ?? 500).json({ error: e.message });
+    }
   }
-});
+);
+
+/* =========================
+   SAVE METER READING
+========================= */
+
+router.post(
+  "/rooms/:roomId/meters",
+  requireRole(["OWNER"]),
+  async (req, res) => {
+    try {
+      const room = await assertReadableRoomOrThrow(req, String(req.params.roomId));
+
+      const { cycleId, month, currWater, currElectric, note } = req.body;
+
+      let cycle = null;
+
+      if (cycleId) {
+        cycle = await prisma.meterCycle.findFirst({
+          where: {
+            id: String(cycleId),
+            condoId: room.condoId,
+          },
+        });
+      } else {
+        const targetMonth = parseMonthInput(month);
+        cycle = await findOrCreateCycleForMonth(room.condoId, targetMonth);
+      }
+
+      if (!cycle) {
+        return res.status(400).json({ error: "cycleId or month is required" });
+      }
+
+      if (cycle.status === "CLOSED") {
+        return res.status(400).json({ error: "รอบบิลนี้ถูกปิดแล้ว" });
+      }
+
+      const safeCurrWater = Math.max(0, toSafeNumber(currWater));
+      const safeCurrElectric = Math.max(0, toSafeNumber(currElectric));
+      const safeNote = normalizeOptionalText(note);
+
+      const saved = await prisma.$transaction(async (tx) => {
+        const prevReading = await tx.meterReading.findFirst({
+          where: {
+            roomId: room.id,
+            cycle: {
+              cycleMonth: {
+                lt: cycle.cycleMonth,
+              },
+            },
+          },
+          orderBy: {
+            cycle: {
+              cycleMonth: "desc",
+            },
+          },
+        });
+
+        const prevWater = Number(prevReading?.currWater ?? 0);
+        const prevElectric = Number(prevReading?.currElectric ?? 0);
+
+        if (safeCurrWater < prevWater) {
+          const err: any = new Error("เลขมิเตอร์น้ำต้องไม่น้อยกว่าครั้งก่อน");
+          err.status = 400;
+          throw err;
+        }
+
+        if (safeCurrElectric < prevElectric) {
+          const err: any = new Error("เลขมิเตอร์ไฟต้องไม่น้อยกว่าครั้งก่อน");
+          err.status = 400;
+          throw err;
+        }
+
+        const waterUnits = Math.max(0, safeCurrWater - prevWater);
+        const electricUnits = Math.max(0, safeCurrElectric - prevElectric);
+
+        const settings = await tx.condoUtilitySetting.findMany({
+          where: { condoId: room.condoId },
+        });
+
+        const waterSetting = settings.find((s) => s.utilityType === "WATER");
+        const electricSetting = settings.find(
+          (s) => s.utilityType === "ELECTRIC"
+        );
+
+        const waterCharge = waterSetting
+          ? calcUtilityCharge(
+              waterUnits,
+              waterSetting.billingType,
+              Number(waterSetting.rate),
+              waterSetting.minimumCharge == null
+                ? null
+                : Number(waterSetting.minimumCharge)
+            )
+          : 0;
+
+        const electricCharge = electricSetting
+          ? calcUtilityCharge(
+              electricUnits,
+              electricSetting.billingType,
+              Number(electricSetting.rate),
+              electricSetting.minimumCharge == null
+                ? null
+                : Number(electricSetting.minimumCharge)
+            )
+          : 0;
+
+        return tx.meterReading.upsert({
+          where: {
+            roomId_cycleId: {
+              roomId: room.id,
+              cycleId: cycle.id,
+            },
+          },
+          update: {
+            prevWater,
+            prevElectric,
+            currWater: safeCurrWater,
+            currElectric: safeCurrElectric,
+            waterUnits,
+            electricUnits,
+            waterCharge,
+            electricCharge,
+            note: safeNote,
+            status: "SUBMITTED",
+            recordedBy: req.user?.id,
+            recordedAt: new Date(),
+          },
+          create: {
+            condoId: room.condoId,
+            roomId: room.id,
+            cycleId: cycle.id,
+            prevWater,
+            prevElectric,
+            currWater: safeCurrWater,
+            currElectric: safeCurrElectric,
+            waterUnits,
+            electricUnits,
+            waterCharge,
+            electricCharge,
+            note: safeNote,
+            status: "SUBMITTED",
+            recordedBy: req.user?.id,
+            recordedAt: new Date(),
+          },
+        });
+      });
+
+      res.json({
+        id: saved.id,
+        cycleId: saved.cycleId,
+        roomId: saved.roomId,
+        prevWater: Number(saved.prevWater ?? 0),
+        currWater: Number(saved.currWater ?? 0),
+        prevElectric: Number(saved.prevElectric ?? 0),
+        currElectric: Number(saved.currElectric ?? 0),
+        waterUnits: Number(saved.waterUnits ?? 0),
+        electricUnits: Number(saved.electricUnits ?? 0),
+        waterCharge: Number(saved.waterCharge ?? 0),
+        electricCharge: Number(saved.electricCharge ?? 0),
+        status: saved.status,
+        recordedAt: saved.recordedAt,
+        note: saved.note,
+      });
+    } catch (e: any) {
+      console.error("SAVE METER ERROR:", e);
+      res.status(e.status ?? 500).json({ error: e.message });
+    }
+  }
+);
 
 /* =========================
    HISTORY
 ========================= */
 
-router.get("/rooms/:roomId/meters/history", async (req, res) => {
-  try {
-    const room = await assertOwnerRoomOrThrow(req, req.params.roomId);
+router.get(
+  "/rooms/:roomId/meters/history",
+  requireRole(["OWNER", "ADMIN", "STAFF"]),
+  requireAnyStaffModule(["METER", "ROOMS", "BILLING", "PAYMENT"]),
+  async (req, res) => {
+    try {
+      const room = await assertReadableRoomOrThrow(req, String(req.params.roomId));
 
-    const list = await prisma.meterReading.findMany({
-      where: { roomId: room.id },
-      include: {
-        cycle: true,
-      },
-      orderBy: {
-        cycle: { cycleMonth: "desc" },
-      },
-    });
+      const list = await prisma.meterReading.findMany({
+        where: { roomId: room.id },
+        include: {
+          cycle: true,
+        },
+        orderBy: {
+          cycle: { cycleMonth: "desc" },
+        },
+      });
 
-    res.json(list.map((item) => mapReadingNumbers(item)));
-  } catch (e: any) {
-    console.error("ROOM HISTORY ERROR:", e);
-    res.status(e.status ?? 500).json({ error: e.message });
+      res.json(list.map((item) => mapReadingNumbers(item)));
+    } catch (e: any) {
+      console.error("ROOM HISTORY ERROR:", e);
+      res.status(e.status ?? 500).json({ error: e.message });
+    }
   }
-});
+);
 
 /* =========================
    CONDO OVERVIEW
 ========================= */
 
-router.get("/condos/:condoId/meters", async (req, res) => {
-  try {
-    const ownerId = req.user?.id;
+router.get(
+  "/condos/:condoId/meters",
+  requireRole(["OWNER", "ADMIN", "STAFF"]),
+  requireAnyStaffModule(["METER", "PAYMENT", "BILLING"]),
+  async (req: any, res) => {
+    try {
+      const user = req.user;
 
-    if (!ownerId) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
+      if (!user?.id) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
 
-    await assertOwnerCondoOrThrow(ownerId, req.params.condoId);
+      if (user.role !== "STAFF") {
+        await assertOwnerCondoOrThrow(user.id, req.params.condoId);
+      }
 
-    const month = parseMonthInput(req.query.month);
-    const cycle = await findOrCreateCycleForMonth(req.params.condoId, month);
+      const month = parseMonthInput(req.query.month);
+      const cycle = await findOrCreateCycleForMonth(req.params.condoId, month);
 
-    const rooms = await prisma.room.findMany({
-      where: { condoId: req.params.condoId },
-      orderBy: { roomNo: "asc" },
-      include: {
-        meter: true,
-      },
-    });
+      const rooms = await prisma.room.findMany({
+        where: { condoId: req.params.condoId },
+        orderBy: { roomNo: "asc" },
+        include: {
+          meter: true,
+        },
+      });
 
-    const readings = await prisma.meterReading.findMany({
-      where: {
+      const readings = await prisma.meterReading.findMany({
+        where: {
+          cycleId: cycle.id,
+        },
+        orderBy: {
+          roomId: "asc",
+        },
+      });
+
+      res.json({
         cycleId: cycle.id,
-      },
-      orderBy: {
-        roomId: "asc",
-      },
-    });
-
-    res.json({
-      cycleId: cycle.id,
-      cycleMonth: cycle.cycleMonth,
-      status: cycle.status,
-      rooms,
-      readings: readings.map((r) => mapReadingNumbers(r)),
-    });
-  } catch (e: any) {
-    console.error("CONDO OVERVIEW ERROR:", e);
-    res.status(e.status ?? 500).json({ error: e.message });
+        cycleMonth: cycle.cycleMonth,
+        status: cycle.status,
+        rooms,
+        readings: readings.map((r) => mapReadingNumbers(r)),
+      });
+    } catch (e: any) {
+      console.error("CONDO OVERVIEW ERROR:", e);
+      res.status(e.status ?? 500).json({ error: e.message });
+    }
   }
-});
+);
 
 export default router;

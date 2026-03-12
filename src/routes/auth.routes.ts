@@ -12,22 +12,29 @@ const router = Router();
 type VerifyChannel = "EMAIL" | "PHONE";
 
 function parseExpiresInSeconds(v?: string): number {
-  // รองรับ: "7d", "24h", "30m", "120s", หรือ "604800"
   if (!v) return 7 * 24 * 60 * 60;
   const raw = v.trim();
   if (/^\d+$/.test(raw)) return Number(raw);
+
   const m = raw.match(/^(\d+)\s*([smhd])$/i);
   if (!m) return 7 * 24 * 60 * 60;
+
   const n = Number(m[1]);
   const unit = m[2].toLowerCase();
-  const mul = unit === "s" ? 1 : unit === "m" ? 60 : unit === "h" ? 3600 : 86400;
+  const mul =
+    unit === "s" ? 1 : unit === "m" ? 60 : unit === "h" ? 3600 : 86400;
+
   return n * mul;
 }
 
 function signToken(payload: { id: string; role: string }) {
   const secret = process.env.JWT_SECRET;
   if (!secret) throw new Error("JWT_SECRET is missing");
-  const expiresInSeconds = parseExpiresInSeconds(process.env.JWT_EXPIRES_IN ?? "7d");
+
+  const expiresInSeconds = parseExpiresInSeconds(
+    process.env.JWT_EXPIRES_IN ?? "7d"
+  );
+
   const options: SignOptions = { expiresIn: expiresInSeconds };
   return jwt.sign(payload, secret as Secret, options);
 }
@@ -65,12 +72,12 @@ function toCleanPhone(phone: unknown): string | null {
   return p.length ? p : null;
 }
 
-
-// Production Auth
-// Step 1: Register (ตั้งรหัสผ่านตั้งแต่แรก)
-// Step 2: Verify Email / Phone (เลือกช่องทางที่ต้องยืนยัน)
-// Step 3: Login ปกติ
-
+/* =========================================================
+   Production Auth
+   Step 1: Register
+   Step 2: Verify Email / Phone
+   Step 3: Login
+   ========================================================= */
 
 // STEP 1) REGISTER
 router.post("/register", async (req, res) => {
@@ -80,7 +87,7 @@ router.post("/register", async (req, res) => {
       email?: string;
       phone?: string;
       password?: string;
-      role?: "OWNER" | "TENANT" | "ADMIN";
+      role?: "OWNER" | "TENANT" | "ADMIN" | "STAFF";
       verifyChannel?: VerifyChannel;
     };
 
@@ -89,19 +96,26 @@ router.post("/register", async (req, res) => {
     const password = body.password;
 
     if (!cleanEmail || !assertString(password)) {
-      return res.status(400).json({ error: "email and password are required" });
+      return res
+        .status(400)
+        .json({ error: "email and password are required" });
     }
+
     if (!cleanPhone) {
       return res.status(400).json({ error: "phone is required" });
     }
 
-    //ตอนนี้ให้สมัครเองได้เฉพาะ OWNER
     if ((body.role || "OWNER") !== "OWNER") {
       return res.status(403).json({ error: "Only OWNER can register" });
     }
 
-    const existed = await prisma.user.findUnique({ where: { email: cleanEmail } });
-    if (existed) return res.status(409).json({ error: "Email already exists" });
+    const existed = await prisma.user.findUnique({
+      where: { email: cleanEmail },
+    });
+
+    if (existed) {
+      return res.status(409).json({ error: "Email already exists" });
+    }
 
     const passwordHash = await bcrypt.hash(String(password), 10);
     const channel = normalizeChannel(body.verifyChannel);
@@ -113,13 +127,17 @@ router.post("/register", async (req, res) => {
         passwordHash,
         name: body.name?.trim() || null,
         role: "OWNER",
-
         verifyChannel: channel as any,
       },
-      select: { id: true, email: true, phone: true, role: true, verifyChannel: true },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        role: true,
+        verifyChannel: true,
+      },
     });
 
-    //สร้างverify request+ส่งโค้ด
     const code = randomOtp6();
     const codeHash = sha256(code);
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
@@ -160,28 +178,49 @@ router.post("/register", async (req, res) => {
   }
 });
 
-//VERIFY EMAIL
+// VERIFY EMAIL
 router.post("/verify/email", async (req, res) => {
   try {
-    const { requestId, code } = (req.body ?? {}) as { requestId?: string; code?: string };
+    const { requestId, code } = (req.body ?? {}) as {
+      requestId?: string;
+      code?: string;
+    };
+
     if (!assertString(requestId) || !assertString(code)) {
-      return res.status(400).json({ error: "requestId and code are required" });
+      return res
+        .status(400)
+        .json({ error: "requestId and code are required" });
     }
 
-    const vr = await prisma.verifyRequest.findUnique({ where: { id: requestId } });
-    if (!vr) return res.status(404).json({ error: "Verify request not found" });
-    if (vr.channel !== "EMAIL") return res.status(400).json({ error: "This request is not EMAIL verification" });
-    if (new Date() > vr.expiresAt) return res.status(400).json({ error: "Code expired" });
+    const vr = await prisma.verifyRequest.findUnique({
+      where: { id: requestId },
+    });
+
+    if (!vr) {
+      return res.status(404).json({ error: "Verify request not found" });
+    }
+
+    if (vr.channel !== "EMAIL") {
+      return res
+        .status(400)
+        .json({ error: "This request is not EMAIL verification" });
+    }
+
+    if (new Date() > vr.expiresAt) {
+      return res.status(400).json({ error: "Code expired" });
+    }
 
     const ok = sha256(code.trim()) === (vr.emailCodeHash || "");
-    if (!ok) return res.status(401).json({ error: "Invalid code" });
+    if (!ok) {
+      return res.status(401).json({ error: "Invalid code" });
+    }
 
     await prisma.user.update({
       where: { id: vr.userId },
       data: { emailVerifiedAt: new Date() },
     });
 
-    await prisma.verifyRequest.delete({ where: { id: vr.id } }).catch(() => { });
+    await prisma.verifyRequest.delete({ where: { id: vr.id } }).catch(() => {});
     return res.json({ ok: true });
   } catch (e) {
     console.error(e);
@@ -189,28 +228,49 @@ router.post("/verify/email", async (req, res) => {
   }
 });
 
-//VERIFY PHONE
+// VERIFY PHONE
 router.post("/verify/phone", async (req, res) => {
   try {
-    const { requestId, otp } = (req.body ?? {}) as { requestId?: string; otp?: string };
+    const { requestId, otp } = (req.body ?? {}) as {
+      requestId?: string;
+      otp?: string;
+    };
+
     if (!assertString(requestId) || !assertString(otp)) {
-      return res.status(400).json({ error: "requestId and otp are required" });
+      return res
+        .status(400)
+        .json({ error: "requestId and otp are required" });
     }
 
-    const vr = await prisma.verifyRequest.findUnique({ where: { id: requestId } });
-    if (!vr) return res.status(404).json({ error: "Verify request not found" });
-    if (vr.channel !== "PHONE") return res.status(400).json({ error: "This request is not PHONE verification" });
-    if (new Date() > vr.expiresAt) return res.status(400).json({ error: "OTP expired" });
+    const vr = await prisma.verifyRequest.findUnique({
+      where: { id: requestId },
+    });
+
+    if (!vr) {
+      return res.status(404).json({ error: "Verify request not found" });
+    }
+
+    if (vr.channel !== "PHONE") {
+      return res
+        .status(400)
+        .json({ error: "This request is not PHONE verification" });
+    }
+
+    if (new Date() > vr.expiresAt) {
+      return res.status(400).json({ error: "OTP expired" });
+    }
 
     const ok = sha256(otp.trim()) === (vr.phoneOtpHash || "");
-    if (!ok) return res.status(401).json({ error: "Invalid OTP" });
+    if (!ok) {
+      return res.status(401).json({ error: "Invalid OTP" });
+    }
 
     await prisma.user.update({
       where: { id: vr.userId },
       data: { phoneVerifiedAt: new Date() },
     });
 
-    await prisma.verifyRequest.delete({ where: { id: vr.id } }).catch(() => { });
+    await prisma.verifyRequest.delete({ where: { id: vr.id } }).catch(() => {});
     return res.json({ ok: true });
   } catch (e) {
     console.error(e);
@@ -222,13 +282,19 @@ router.post("/verify/phone", async (req, res) => {
 router.post("/verify/resend", async (req, res) => {
   try {
     const { requestId } = (req.body ?? {}) as { requestId?: string };
-    if (!assertString(requestId)) return res.status(400).json({ error: "requestId is required" });
+
+    if (!assertString(requestId)) {
+      return res.status(400).json({ error: "requestId is required" });
+    }
 
     const vr = await prisma.verifyRequest.findUnique({
       where: { id: requestId },
       include: { user: true },
     });
-    if (!vr) return res.status(404).json({ error: "Verify request not found" });
+
+    if (!vr) {
+      return res.status(404).json({ error: "Verify request not found" });
+    }
 
     const code = randomOtp6();
     const codeHash = sha256(code);
@@ -245,7 +311,9 @@ router.post("/verify/resend", async (req, res) => {
 
     if (vr.channel === "EMAIL") {
       const toEmail = vr.user.email;
-      if (!toEmail) return res.status(400).json({ error: "User has no email" });
+      if (!toEmail) {
+        return res.status(400).json({ error: "User has no email" });
+      }
 
       await trySend("sendVerifyEmail", () =>
         sendVerifyEmail(toEmail, {
@@ -257,10 +325,11 @@ router.post("/verify/resend", async (req, res) => {
       console.log("Email code (dev):", code, "for", toEmail);
     } else {
       const toPhone = vr.user.phone;
-      if (!toPhone) return res.status(400).json({ error: "User has no phone" });
+      if (!toPhone) {
+        return res.status(400).json({ error: "User has no phone" });
+      }
 
       await trySend("sendVerifySms", () => sendVerifySms(toPhone, code));
-
       console.log("SMS OTP (dev):", code, "for", toPhone);
     }
 
@@ -271,8 +340,7 @@ router.post("/verify/resend", async (req, res) => {
   }
 });
 
-
-// STEP 3) LOGIN 
+// STEP 3) LOGIN
 router.post("/login", async (req, res) => {
   try {
     const { email, phone, identifier, password } = (req.body ?? {}) as {
@@ -283,8 +351,11 @@ router.post("/login", async (req, res) => {
     };
 
     const loginIdRaw = email ?? phone ?? identifier;
+
     if (!assertString(loginIdRaw) || !assertString(password)) {
-      return res.status(400).json({ error: "email/phone and password are required" });
+      return res
+        .status(400)
+        .json({ error: "email/phone and password are required" });
     }
 
     const loginId = String(loginIdRaw).trim();
@@ -299,35 +370,71 @@ router.post("/login", async (req, res) => {
       where: isEmail ? { email: cleanEmail! } : { phone: loginId },
     });
 
-    if (!user || !user.passwordHash) return res.status(401).json({ error: "Invalid credentials" });
-
+    if (!user || !user.passwordHash) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
 
     if ((user as any).isActive === false) {
       return res.status(403).json({ error: "Account is inactive" });
     }
 
     const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) return res.status(401).json({ error: "Invalid credentials" });
-
+    if (!ok) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
 
     const need = (user as any).verifyChannel as VerifyChannel;
     const verified =
-      need === "EMAIL" ? !!(user as any).emailVerifiedAt : !!(user as any).phoneVerifiedAt;
+      need === "EMAIL"
+        ? !!(user as any).emailVerifiedAt
+        : !!(user as any).phoneVerifiedAt;
 
     if (!verified) {
-      return res.status(403).json({ error: `Please verify your ${need.toLowerCase()} first` });
+      return res
+        .status(403)
+        .json({ error: `Please verify your ${need.toLowerCase()} first` });
     }
 
+    let staffMemberships:
+      | {
+          id: string;
+          condoId: string;
+          condoName: string;
+          staffPosition?: string | null;
+          isActive?: boolean;
+          allowedModules: string[];
+        }[]
+      | undefined = undefined;
 
-    let staffMemberships: any[] | undefined = undefined;
     if (user.role === "STAFF") {
       const memberships = await prisma.staffMembership.findMany({
-        where: { staffUserId: user.id, isActive: true },
+        where: {
+          staffUserId: user.id,
+          isActive: true,
+        },
         select: {
           id: true,
           condoId: true,
           staffPosition: true,
-          condo: { select: { id: true, nameTh: true, nameEn: true } },
+          isActive: true,
+          createdAt: true,
+          condo: {
+            select: {
+              id: true,
+              nameTh: true,
+              nameEn: true,
+            },
+          },
+          permissionOverrides: {
+            where: { allowed: true },
+            select: {
+              permission: {
+                select: {
+                  module: true,
+                },
+              },
+            },
+          },
         },
         orderBy: { createdAt: "desc" },
       });
@@ -341,13 +448,23 @@ router.post("/login", async (req, res) => {
         condoId: m.condoId,
         condoName: m.condo?.nameTh ?? m.condo?.nameEn ?? "—",
         staffPosition: m.staffPosition,
+        isActive: m.isActive,
+        allowedModules: (m.permissionOverrides ?? []).map(
+          (x) => x.permission.module
+        ),
       }));
     }
 
     const token = signToken({ id: user.id, role: user.role });
 
     return res.json({
-      user: { id: user.id, email: user.email, phone: user.phone, name: user.name, role: user.role },
+      user: {
+        id: user.id,
+        email: user.email,
+        phone: user.phone,
+        name: user.name,
+        role: user.role,
+      },
       token,
       ...(staffMemberships ? { staffMemberships } : {}),
     });
@@ -357,22 +474,30 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// Forgot password (Production)
+// Forgot password
 router.post("/password/forgot", async (req, res) => {
   try {
-    const { identifier, channel } = (req.body ?? {}) as { identifier?: string; channel?: VerifyChannel };
-    if (!assertString(identifier)) return res.status(400).json({ error: "identifier is required" });
+    const { identifier, channel } = (req.body ?? {}) as {
+      identifier?: string;
+      channel?: VerifyChannel;
+    };
+
+    if (!assertString(identifier)) {
+      return res.status(400).json({ error: "identifier is required" });
+    }
 
     const ch = normalizeChannel(channel);
 
     const user =
       ch === "EMAIL"
-        ? await prisma.user.findUnique({ where: { email: identifier.trim().toLowerCase() } })
-        : await prisma.user.findFirst({ where: { phone: identifier.trim() } });
+        ? await prisma.user.findUnique({
+            where: { email: identifier.trim().toLowerCase() },
+          })
+        : await prisma.user.findFirst({
+            where: { phone: identifier.trim() },
+          });
 
     if (!user) return res.json({ ok: true });
-
-
     if (ch === "EMAIL" && !user.email) return res.json({ ok: true });
     if (ch === "PHONE" && !user.phone) return res.json({ ok: true });
 
@@ -380,7 +505,9 @@ router.post("/password/forgot", async (req, res) => {
     const codeHash = sha256(code);
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    await prisma.passwordResetRequest.deleteMany({ where: { userId: user.id } }).catch(() => { });
+    await prisma.passwordResetRequest
+      .deleteMany({ where: { userId: user.id } })
+      .catch(() => {});
 
     const pr = await prisma.passwordResetRequest.create({
       data: {
@@ -407,7 +534,12 @@ router.post("/password/forgot", async (req, res) => {
       console.log("Reset OTP (dev):", code, "for", to);
     }
 
-    return res.json({ ok: true, requestId: pr.id, channel: pr.channel, expiresAt: pr.expiresAt });
+    return res.json({
+      ok: true,
+      requestId: pr.id,
+      channel: pr.channel,
+      expiresAt: pr.expiresAt,
+    });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "Forgot password failed" });
@@ -422,21 +554,48 @@ router.post("/password/reset", async (req, res) => {
       newPassword?: string;
     };
 
-    if (!assertString(requestId) || !assertString(code) || !assertString(newPassword)) {
-      return res.status(400).json({ error: "requestId, code and newPassword are required" });
+    if (
+      !assertString(requestId) ||
+      !assertString(code) ||
+      !assertString(newPassword)
+    ) {
+      return res
+        .status(400)
+        .json({ error: "requestId, code and newPassword are required" });
     }
 
-    const pr = await prisma.passwordResetRequest.findUnique({ where: { id: requestId } });
-    if (!pr) return res.status(404).json({ error: "Reset request not found" });
-    if (pr.usedAt) return res.status(400).json({ error: "Reset request already used" });
-    if (new Date() > pr.expiresAt) return res.status(400).json({ error: "Code expired" });
+    const pr = await prisma.passwordResetRequest.findUnique({
+      where: { id: requestId },
+    });
+
+    if (!pr) {
+      return res.status(404).json({ error: "Reset request not found" });
+    }
+
+    if (pr.usedAt) {
+      return res.status(400).json({ error: "Reset request already used" });
+    }
+
+    if (new Date() > pr.expiresAt) {
+      return res.status(400).json({ error: "Code expired" });
+    }
 
     const ok = sha256(code.trim()) === pr.codeHash;
-    if (!ok) return res.status(401).json({ error: "Invalid code" });
+    if (!ok) {
+      return res.status(401).json({ error: "Invalid code" });
+    }
 
     const passwordHash = await bcrypt.hash(newPassword, 10);
-    await prisma.user.update({ where: { id: pr.userId }, data: { passwordHash } });
-    await prisma.passwordResetRequest.update({ where: { id: pr.id }, data: { usedAt: new Date() } });
+
+    await prisma.user.update({
+      where: { id: pr.userId },
+      data: { passwordHash },
+    });
+
+    await prisma.passwordResetRequest.update({
+      where: { id: pr.id },
+      data: { usedAt: new Date() },
+    });
 
     return res.json({ ok: true });
   } catch (e) {
@@ -445,19 +604,25 @@ router.post("/password/reset", async (req, res) => {
   }
 });
 
-
 // ME + LOGOUT
 router.get("/me", authRequired, async (req, res) => {
   const userId = req.user!.id;
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, email: true, name: true, role: true, phone: true },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      phone: true,
+    },
   });
 
-  if (!user) return res.status(404).json({ error: "User not found" });
+  if (!user) {
+    return res.status(404).json({ error: "User not found" });
+  }
 
-  // STAFF: ส่ง memberships + สิทธิ์ 
   if (user.role === "STAFF") {
     const memberships = await prisma.staffMembership.findMany({
       where: { staffUserId: userId, isActive: true },
@@ -466,11 +631,22 @@ router.get("/me", authRequired, async (req, res) => {
         condoId: true,
         staffPosition: true,
         isActive: true,
-        condo: { select: { id: true, nameTh: true, nameEn: true } },
+        condo: {
+          select: {
+            id: true,
+            nameTh: true,
+            nameEn: true,
+          },
+        },
         permissionOverrides: {
           select: {
             allowed: true,
-            permission: { select: { module: true, code: true } },
+            permission: {
+              select: {
+                module: true,
+                code: true,
+              },
+            },
           },
         },
       },
@@ -495,24 +671,26 @@ router.get("/me", authRequired, async (req, res) => {
   return res.json({ user });
 });
 
-
 router.post("/logout", (_req, res) => {
   return res.json({ ok: true });
 });
 
 /* =========================================================
    LINE OAuth Login
-   GET /auth/line/login → redirect ไป LINE OAuth
-   GET /auth/line/callback → รับ code จาก LINE, แลก token, redirect กลับ frontend
    ========================================================= */
 
 router.get("/line/login", (_req, res) => {
   const channelId = process.env.LINE_LOGIN_CLIENT_ID;
   if (!channelId) {
-    return res.status(500).json({ error: "LINE_LOGIN_CLIENT_ID not configured" });
+    return res
+      .status(500)
+      .json({ error: "LINE_LOGIN_CLIENT_ID not configured" });
   }
 
-  const baseUrl = (process.env.API_URL || "http://localhost:3000").replace(/\/+$/, "");
+  const baseUrl = (process.env.API_URL || "http://localhost:3000").replace(
+    /\/+$/,
+    ""
+  );
   const callbackUrl = `${baseUrl}/auth/line/callback`;
   const state = Math.random().toString(36).substring(2, 15);
 
@@ -530,20 +708,28 @@ router.get("/line/login", (_req, res) => {
 router.get("/line/callback", async (req, res) => {
   try {
     const { code } = req.query as { code?: string };
+
     if (!code) {
       return res.status(400).send("Missing authorization code from LINE");
     }
 
     const channelId = process.env.LINE_LOGIN_CLIENT_ID;
     const channelSecret = process.env.LINE_LOGIN_CLIENT_SECRET;
+
     if (!channelId || !channelSecret) {
-      return res.status(500).send("LINE_LOGIN_CLIENT_ID or LINE_LOGIN_CLIENT_SECRET not configured");
+      return res
+        .status(500)
+        .send(
+          "LINE_LOGIN_CLIENT_ID or LINE_LOGIN_CLIENT_SECRET not configured"
+        );
     }
 
-    const baseUrl = (process.env.API_URL || "http://localhost:3000").replace(/\/+$/, "");
+    const baseUrl = (process.env.API_URL || "http://localhost:3000").replace(
+      /\/+$/,
+      ""
+    );
     const callbackUrl = `${baseUrl}/auth/line/callback`;
 
-    // 1) Exchange code for access token
     const tokenRes = await fetch("https://api.line.me/oauth2/v2.1/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -555,19 +741,31 @@ router.get("/line/callback", async (req, res) => {
         client_secret: channelSecret,
       }),
     });
+
     const tokenData = (await tokenRes.json()) as any;
 
     if (!tokenRes.ok || !tokenData.access_token) {
-      console.error("LINE token exchange failed:", JSON.stringify(tokenData, null, 2));
+      console.error(
+        "LINE token exchange failed:",
+        JSON.stringify(tokenData, null, 2)
+      );
       console.error("callbackUrl used:", callbackUrl);
       console.error("channelId:", channelId);
-      return res.status(400).send("LINE token exchange failed: " + (tokenData?.error_description || tokenData?.error || "unknown"));
+
+      return res
+        .status(400)
+        .send(
+          "LINE token exchange failed: " +
+            (tokenData?.error_description ||
+              tokenData?.error ||
+              "unknown")
+        );
     }
 
-    // 2) Get user profile
     const profileRes = await fetch("https://api.line.me/v2/profile", {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
+
     const profile = (await profileRes.json()) as any;
     const lineUserId = profile.userId;
 
@@ -575,14 +773,12 @@ router.get("/line/callback", async (req, res) => {
       return res.status(400).send("Could not get LINE userId");
     }
 
-    // 3) Upsert LineAccount in DB
     const existing = await prisma.lineAccount.findUnique({
       where: { lineUserId },
       select: { id: true, userId: true },
     });
 
     if (!existing) {
-      // Create a new TENANT user + LineAccount
       const newUser = await prisma.user.create({
         data: {
           role: "TENANT",
@@ -603,7 +799,6 @@ router.get("/line/callback", async (req, res) => {
         },
       });
     } else {
-      // Update display name/picture
       await prisma.lineAccount.update({
         where: { lineUserId },
         data: {
@@ -615,14 +810,21 @@ router.get("/line/callback", async (req, res) => {
       });
     }
 
-    // 4) Redirect to frontend with lineUserId
-    const frontendUrl = (process.env.APP_URL || "http://localhost:5173").replace(/\/+$/, "");
+    const frontendUrl = (process.env.APP_URL || "http://localhost:5173").replace(
+      /\/+$/,
+      ""
+    );
+
     return res.redirect(
-      `${frontendUrl}/owner/line-login-success?lineUserId=${encodeURIComponent(lineUserId)}`
+      `${frontendUrl}/owner/line-login-success?lineUserId=${encodeURIComponent(
+        lineUserId
+      )}`
     );
   } catch (err: any) {
     console.error("LINE callback error:", err);
-    return res.status(500).send("LINE login failed: " + (err?.message || "unknown"));
+    return res
+      .status(500)
+      .send("LINE login failed: " + (err?.message || "unknown"));
   }
 });
 
