@@ -114,8 +114,7 @@ router.post("/create", async (req, res) => {
                         `📦 แจ้งเตือนพัสดุ\n` +
                         `ห้อง: ${roomInfo?.roomNo ?? "-"}\n` +
                         (trackingNo ? `เลขพัสดุ: ${trackingNo}\n` : "") +
-                        (carrier ? `ขนส่ง: ${carrier}\n` : "") +
-                        (senderName ? `ผู้ส่ง: ${senderName}\n` : "") +
+                        (note ? `📝 ${note}\n` : "") +
                         `กรุณามารับพัสดุที่ห้องพัก`;
                     await pushLineMessage(lineAccount.lineUserId, msg, uploadedImageUrl);
                 }
@@ -159,6 +158,11 @@ router.get("/room", async (req, res) => {
                 createdAt: true,
                 pickedUpAt: true,
                 room: { select: { roomNo: true } },
+                tenant: { select: { name: true } },
+                attachments: {
+                    select: { fileUrl: true },
+                    take: 1,
+                },
             },
         });
 
@@ -171,8 +175,10 @@ router.get("/room", async (req, res) => {
                 status: p.status,
                 note: p.pickupNote,
                 room: p.room?.roomNo || null,
+                tenantName: p.tenant?.name || null,
                 createdAt: p.createdAt.toISOString(),
                 pickedUpAt: p.pickedUpAt?.toISOString() || null,
+                imageUrl: p.attachments?.[0]?.fileUrl || null,
             })),
         });
     } catch (err: any) {
