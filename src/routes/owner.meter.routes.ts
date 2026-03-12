@@ -137,20 +137,39 @@ async function assertOwnerCondoOrThrow(ownerId: string, condoId: string) {
 async function findOrCreateCycleForMonth(condoId: string, targetMonth: Date) {
   const start = getMonthStart(targetMonth);
 
-  return prisma.meterCycle.upsert({
+  const existing = await prisma.meterCycle.findUnique({
     where: {
       condoId_cycleMonth: {
         condoId,
         cycleMonth: start,
       },
     },
-    update: {},
-    create: {
-      condoId,
-      cycleMonth: start,
-      openedAt: new Date(),
-    },
   });
+
+  if (existing) return existing;
+
+  try {
+    return await prisma.meterCycle.create({
+      data: {
+        condoId,
+        cycleMonth: start,
+      },
+    });
+  } catch (e: any) {
+    if (e?.code === "P2002") {
+      const createdByOtherRequest = await prisma.meterCycle.findUnique({
+        where: {
+          condoId_cycleMonth: {
+            condoId,
+            cycleMonth: start,
+          },
+        },
+      });
+
+      if (createdByOtherRequest) return createdByOtherRequest;
+    }
+    throw e;
+  }
 }
 
 async function findPreviousReading(roomId: string, currentCycleMonth: Date) {

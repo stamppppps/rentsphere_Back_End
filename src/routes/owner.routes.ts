@@ -291,8 +291,22 @@ router.post("/condos", async (req, res) => {
     if (!finalNameTh) return res.status(400).json({ error: "nameTh is required" });
     if (!finalAddressTh) return res.status(400).json({ error: "addressTh is required" });
 
+    const subdistrictTh =
+      asTrimmedString(body.subdistrictTh) ?? asTrimmedString(body.subdistrict);
+    const districtTh =
+      asTrimmedString(body.districtTh) ?? asTrimmedString(body.district);
+    const provinceTh =
+      asTrimmedString(body.provinceTh) ?? asTrimmedString(body.province);
+    const postalCodeTh =
+      asTrimmedString(body.postalCodeTh) ?? asTrimmedString(body.postalCode);
+
     const nameEn = asTrimmedString(body.nameEn);
     const addressEn = asTrimmedString(body.addressEn);
+    const subdistrictEn = asTrimmedString(body.subdistrictEn);
+    const districtEn = asTrimmedString(body.districtEn);
+    const provinceEn = asTrimmedString(body.provinceEn);
+    const postalCodeEn = asTrimmedString(body.postalCodeEn);
+
     const phoneNumber = asTrimmedString(body.phoneNumber);
     const taxId = asTrimmedString(body.taxId);
 
@@ -333,8 +347,16 @@ router.post("/condos", async (req, res) => {
           ownerUserId: ownerId,
           nameTh: finalNameTh,
           addressTh: finalAddressTh,
+          subdistrictTh,
+          districtTh,
+          provinceTh,
+          postalCodeTh,
           nameEn,
           addressEn,
+          subdistrictEn,
+          districtEn,
+          provinceEn,
+          postalCodeEn,
           phoneNumber,
           taxId,
         },
@@ -371,7 +393,6 @@ router.post("/condos", async (req, res) => {
     });
   }
 });
-
 /* =========================
    GET /owner/condos
    ========================= */
@@ -425,9 +446,19 @@ router.get("/condos/:condoId", async (req, res) => {
     return res.json({
       id: condo.id,
       nameTh: condo.nameTh,
+      subdistrictTh: condo.subdistrictTh,
+      districtTh: condo.districtTh,
+      provinceTh: condo.provinceTh,
+      postalCodeTh: condo.postalCodeTh,
       addressTh: condo.addressTh,
+
       nameEn: condo.nameEn,
+      subdistrictEn: condo.subdistrictEn,
+      districtEn: condo.districtEn,
+      provinceEn: condo.provinceEn,
+      postalCodeEn: condo.postalCodeEn,
       addressEn: condo.addressEn,
+
       phoneNumber: condo.phoneNumber,
       taxId: condo.taxId,
       billingSetting: condo.billingSetting
@@ -479,8 +510,22 @@ router.put("/condos/:condoId", async (req, res) => {
       return res.status(400).json({ error: "addressTh is required" });
     }
 
+    const subdistrictTh =
+      asTrimmedString(body.subdistrictTh) ?? asTrimmedString(body.subdistrict);
+    const districtTh =
+      asTrimmedString(body.districtTh) ?? asTrimmedString(body.district);
+    const provinceTh =
+      asTrimmedString(body.provinceTh) ?? asTrimmedString(body.province);
+    const postalCodeTh =
+      asTrimmedString(body.postalCodeTh) ?? asTrimmedString(body.postalCode);
+
     const nameEn = asTrimmedString(body.nameEn);
     const addressEn = asTrimmedString(body.addressEn);
+    const subdistrictEn = asTrimmedString(body.subdistrictEn);
+    const districtEn = asTrimmedString(body.districtEn);
+    const provinceEn = asTrimmedString(body.provinceEn);
+    const postalCodeEn = asTrimmedString(body.postalCodeEn);
+
     const phoneNumber = asTrimmedString(body.phoneNumber);
     const taxId = asTrimmedString(body.taxId);
 
@@ -505,8 +550,16 @@ router.put("/condos/:condoId", async (req, res) => {
         data: {
           nameTh,
           addressTh,
+          subdistrictTh,
+          districtTh,
+          provinceTh,
+          postalCodeTh,
           nameEn,
           addressEn,
+          subdistrictEn,
+          districtEn,
+          provinceEn,
+          postalCodeEn,
           phoneNumber,
           taxId,
         },
@@ -518,12 +571,16 @@ router.put("/condos/:condoId", async (req, res) => {
           condoId,
           dueDay,
           acceptFine,
-          finePerDay: acceptFine ? new Prisma.Decimal(String(finePerDay ?? 0)) : new Prisma.Decimal("0"),
+          finePerDay: acceptFine
+            ? new Prisma.Decimal(String(finePerDay ?? 0))
+            : new Prisma.Decimal("0"),
         },
         update: {
           dueDay,
           acceptFine,
-          finePerDay: acceptFine ? new Prisma.Decimal(String(finePerDay ?? 0)) : new Prisma.Decimal("0"),
+          finePerDay: acceptFine
+            ? new Prisma.Decimal(String(finePerDay ?? 0))
+            : new Prisma.Decimal("0"),
         },
       });
 

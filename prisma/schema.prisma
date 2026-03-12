@@ -65,6 +65,8 @@ model User {
   condoPaymentInstructionsUpdated CondoPaymentInstruction[] @relation("CondoPaymentInstructionUpdatedBy")
   advancePaymentsCreated          AdvancePayment[]          @relation("AdvancePaymentCreatedBy")
   roomContractsCreated            RoomContract[]            @relation("RoomContractCreatedBy")
+  paymentSlips                    PaymentSlip[]
+  reviewedPaymentSlips            PaymentSlip[]             @relation("PaymentSlipReviewedBy")
 
   staffInvitesTarget StaffInvite[] @relation("StaffInviteTargetUser")
 }
@@ -113,19 +115,32 @@ model PasswordResetRequest {
 }
 
 model Condo {
-  id                       String                    @id @default(uuid()) @db.Uuid
-  ownerUserId              String                    @db.Uuid
-  description              String?
-  totalFloors              Int?
-  status                   CondoStatus               @default(ACTIVE)
-  createdAt                DateTime                  @default(now())
-  updatedAt                DateTime?                 @updatedAt
-  addressEn                String?
-  addressTh                String
-  nameEn                   String?
-  nameTh                   String
-  phoneNumber              String?
-  taxId                    String?
+  id          String      @id @default(uuid()) @db.Uuid
+  ownerUserId String      @db.Uuid
+  description String?
+  totalFloors Int?
+  status      CondoStatus @default(ACTIVE)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime?   @updatedAt
+
+  addressEn String?
+  addressTh String
+  nameEn    String?
+  nameTh    String
+
+  subdistrictTh String?
+  districtTh    String?
+  provinceTh    String?
+  postalCodeTh  String?
+
+  subdistrictEn String?
+  districtEn    String?
+  provinceEn    String?
+  postalCodeEn  String?
+
+  phoneNumber String?
+  taxId       String?
+
   announcements            Announcement[]
   chatRooms                ChatRoom[]
   owner                    User                      @relation("CondoOwner", fields: [ownerUserId], references: [id])
@@ -163,21 +178,22 @@ model Condo {
   roomContracts            RoomContract[]
 
   paymentInstruction CondoPaymentInstruction?
+  paymentSlips       PaymentSlip[]
 
   @@index([ownerUserId])
 }
 
 model CondoUtilitySetting {
-  id          String             @id @default(cuid())
-  condoId     String             @db.Uuid
-  utilityType UtilityType
-  billingType UtilityBillingType
-  rate        Decimal            @db.Decimal(12, 2)
-  minimumCharge Decimal?         @db.Decimal(12, 2)
-  createdBy   String?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  condo       Condo              @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  id            String             @id @default(cuid())
+  condoId       String             @db.Uuid
+  utilityType   UtilityType
+  billingType   UtilityBillingType
+  rate          Decimal            @db.Decimal(12, 2)
+  minimumCharge Decimal?           @db.Decimal(12, 2)
+  createdBy     String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  condo         Condo              @relation(fields: [condoId], references: [id], onDelete: Cascade)
 
   @@unique([condoId, utilityType])
   @@index([condoId])
@@ -428,6 +444,7 @@ model Room {
   tenantCodes            TenantRoomCode[]
   advancePayments        AdvancePayment[]
   roomContracts          RoomContract[]
+  paymentSlips           PaymentSlip[]
 
   @@unique([condoId, roomNo])
   @@index([condoId])
@@ -1033,29 +1050,29 @@ model MeterCycle {
 }
 
 model MeterReading {
-  id            String             @id @default(uuid()) @db.Uuid
-  condoId       String             @db.Uuid
-  roomId        String             @db.Uuid
-  cycleId       String             @db.Uuid
-  prevWater     Decimal?           @db.Decimal(12, 2)
-  currWater     Decimal?           @db.Decimal(12, 2)
-  prevElectric  Decimal?           @db.Decimal(12, 2)
-  currElectric  Decimal?           @db.Decimal(12, 2)
-  waterUnits    Decimal?           @db.Decimal(12, 2)
-  electricUnits Decimal?           @db.Decimal(12, 2)
+  id             String             @id @default(uuid()) @db.Uuid
+  condoId        String             @db.Uuid
+  roomId         String             @db.Uuid
+  cycleId        String             @db.Uuid
+  prevWater      Decimal?           @db.Decimal(12, 2)
+  currWater      Decimal?           @db.Decimal(12, 2)
+  prevElectric   Decimal?           @db.Decimal(12, 2)
+  currElectric   Decimal?           @db.Decimal(12, 2)
+  waterUnits     Decimal?           @db.Decimal(12, 2)
+  electricUnits  Decimal?           @db.Decimal(12, 2)
   waterCharge    Decimal?           @db.Decimal(12, 2)
   electricCharge Decimal?           @db.Decimal(12, 2)
-  status        MeterReadingStatus @default(PENDING)
-  recordedAt    DateTime?
-  recordedBy    String?            @db.Uuid
-  note          String?
-  createdAt     DateTime           @default(now())
-  invoiceItems  InvoiceItem[]
-  attachments   MeterAttachment[]
-  condo         Condo              @relation(fields: [condoId], references: [id], onDelete: Cascade)
-  cycle         MeterCycle         @relation(fields: [cycleId], references: [id], onDelete: Cascade)
-  recorder      User?              @relation("MeterReadingRecordedBy", fields: [recordedBy], references: [id])
-  room          Room               @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  status         MeterReadingStatus @default(PENDING)
+  recordedAt     DateTime?
+  recordedBy     String?            @db.Uuid
+  note           String?
+  createdAt      DateTime           @default(now())
+  invoiceItems   InvoiceItem[]
+  attachments    MeterAttachment[]
+  condo          Condo              @relation(fields: [condoId], references: [id], onDelete: Cascade)
+  cycle          MeterCycle         @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  recorder       User?              @relation("MeterReadingRecordedBy", fields: [recordedBy], references: [id])
+  room           Room               @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
   @@unique([roomId, cycleId])
   @@index([condoId])
@@ -1099,6 +1116,7 @@ model Invoice {
   meterLinks     InvoiceMeterLink[]
   paymentNotices PaymentNotice[]
   paymentTxns    PaymentTransaction[]
+  paymentSlips   PaymentSlip[]
 
   @@unique([roomId, billingMonth])
   @@index([condoId])
@@ -1188,6 +1206,7 @@ model PaymentTransaction {
   invoice         Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   paidToAccount   CondoBankAccount? @relation(fields: [paidToAccountId], references: [id])
   notice          PaymentNotice?    @relation(fields: [paymentNoticeId], references: [id])
+  paymentSlips    PaymentSlip[]
 
   @@index([condoId])
   @@index([invoiceId])
@@ -1253,6 +1272,52 @@ model ReportMonthlySnapshot {
   condo            Condo    @relation(fields: [condoId], references: [id], onDelete: Cascade)
 
   @@unique([condoId, month])
+}
+
+model PaymentSlip {
+  id           String  @id @default(uuid()) @db.Uuid
+  userId       String? @db.Uuid
+  lineUserId   String?
+  condoId      String? @db.Uuid
+  roomId       String? @db.Uuid
+  invoiceId    String? @db.Uuid
+  paymentTxnId String? @db.Uuid
+
+  amount         Decimal?          @db.Decimal(12, 2)
+  senderName     String?
+  receiverName   String?
+  transactionRef String?
+  transferTime   DateTime?
+  slipImageUrl   String
+  status         PaymentSlipStatus @default(PENDING)
+
+  createdAt  DateTime  @default(now())
+  reviewedAt DateTime?
+  reviewedBy String?   @db.Uuid
+  note       String?
+
+  user       User?               @relation(fields: [userId], references: [id])
+  condo      Condo?              @relation(fields: [condoId], references: [id], onDelete: SetNull)
+  room       Room?               @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  invoice    Invoice?            @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  paymentTxn PaymentTransaction? @relation(fields: [paymentTxnId], references: [id], onDelete: SetNull)
+  reviewer   User?               @relation("PaymentSlipReviewedBy", fields: [reviewedBy], references: [id])
+
+  @@index([userId])
+  @@index([lineUserId])
+  @@index([condoId])
+  @@index([roomId])
+  @@index([invoiceId])
+  @@index([paymentTxnId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum PaymentSlipStatus {
+  PENDING
+  MATCHED
+  APPROVED
+  REJECTED
 }
 
 enum Role {
