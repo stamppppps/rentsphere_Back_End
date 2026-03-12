@@ -9,10 +9,12 @@ import { uploadMemory } from "../middlewares/uploadMemory.js";
 import { prisma } from "../prisma.js";
 import { cloudinary } from "../utils/cloudinary.js";
 import { sendStaffInviteEmail } from "../utils/mailer.js";
+import facilityRoutes from "./facility.routes.js";
 
 const router = Router();
 
 router.use(authRequired, requireRole(["OWNER"]));
+router.use("/", facilityRoutes);
 
 /* =========================
    Permission helpers
