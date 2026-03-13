@@ -309,6 +309,10 @@ router.get("/condo/:condoId", async (req, res) => {
                 createdAt: true,
                 room: { select: { roomNo: true } },
                 tenant: { select: { name: true } },
+                attachments: {
+                    select: { id: true, fileUrl: true, createdAt: true },
+                    orderBy: { createdAt: "asc" as const },
+                },
             },
         });
 
@@ -322,6 +326,7 @@ router.get("/condo/:condoId", async (req, res) => {
                 created_at: r.createdAt.toISOString(),
                 room: r.room?.roomNo || null,
                 tenantName: r.tenant?.name || null,
+                images: r.attachments?.map((a) => a.fileUrl) || [],
             })),
         });
     } catch (err: any) {
