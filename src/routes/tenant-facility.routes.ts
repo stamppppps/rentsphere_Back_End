@@ -566,6 +566,17 @@ router.get("/facilities/:facilityId/slots", async (req, res) => {
             orderBy: { startTime: "asc" },
         });
 
+        // Extract hours/minutes from Prisma Date objects to avoid timezone issues
+        const openHours = openTime.getHours();
+        const openMins = openTime.getMinutes();
+        const closeHours = closeTime.getHours();
+        const closeMins = closeTime.getMinutes();
+
+        const openTotalMins = openHours * 60 + openMins;
+        const closeTotalMins = closeHours * 60 + closeMins;
+
+        console.log(`SLOT GEN: open=${openHours}:${openMins} (${openTotalMins}m), close=${closeHours}:${closeMins} (${closeTotalMins}m), slotMinutes=${slotMinutes}`);
+
         const slots: Array<{
             startTime: string;
             endTime: string;
@@ -574,17 +585,20 @@ router.get("/facilities/:facilityId/slots", async (req, res) => {
             maxPeople: number;
         }> = [];
 
-        let cursor = new Date(openTime);
-        const close = new Date(closeTime);
+        let cursorMins = openTotalMins;
 
-        while (cursor < close) {
-            const slotStart = new Date(cursor);
-            const slotEnd = new Date(cursor.getTime() + slotMinutes * 60 * 1000);
+        while (cursorMins + slotMinutes <= closeTotalMins) {
+            const slotStartH = Math.floor(cursorMins / 60);
+            const slotStartM = cursorMins % 60;
+            const slotEndMins = cursorMins + slotMinutes;
+            const slotEndH = Math.floor(slotEndMins / 60);
+            const slotEndM = slotEndMins % 60;
 
-            if (slotEnd > close) break;
+            const slotStartDate = new Date(1970, 0, 1, slotStartH, slotStartM, 0, 0);
+            const slotEndDate = new Date(1970, 0, 1, slotEndH, slotEndM, 0, 0);
 
             const overlappedBookings = existingBookings.filter((b) => {
-                return slotStart < b.endTime && slotEnd > b.startTime;
+                return slotStartDate < b.endTime && slotEndDate > b.startTime;
             });
 
             const usedPeople = overlappedBookings.reduce((sum, b) => {
@@ -594,19 +608,24 @@ router.get("/facilities/:facilityId/slots", async (req, res) => {
             const available =
                 facility.isActive &&
                 usedPeople < maxPeople &&
-                !isPastBookingStart(bookingDate, slotStart) &&
-                !isWithin30Minutes(bookingDate, slotStart);
+                !isPastBookingStart(bookingDate, slotStartDate) &&
+                !isWithin30Minutes(bookingDate, slotStartDate);
+
+            const startTimeStr = `${String(slotStartH).padStart(2, "0")}:${String(slotStartM).padStart(2, "0")}`;
+            const endTimeStr = `${String(slotEndH).padStart(2, "0")}:${String(slotEndM).padStart(2, "0")}`;
 
             slots.push({
-                startTime: timeToHHMM(slotStart)!,
-                endTime: timeToHHMM(slotEnd)!,
+                startTime: startTimeStr,
+                endTime: endTimeStr,
                 available,
                 currentPeople: usedPeople,
                 maxPeople,
             });
 
-            cursor = slotEnd;
+            cursorMins = slotEndMins;
         }
+
+        console.log(`SLOT GEN: generated ${slots.length} slots`);
 
         return res.json({
             facilityId,
@@ -707,7 +726,12 @@ router.post("/facilities/:facilityId/bookings", async (req, res) => {
         const openTime = setting.openTime;
         const closeTime = setting.closeTime;
 
-        if (startTime < openTime || endTime > closeTime) {
+        const startMins = startTime.getHours() * 60 + startTime.getMinutes();
+        const endMins = endTime.getHours() * 60 + endTime.getMinutes();
+        const openMins = openTime.getHours() * 60 + openTime.getMinutes();
+        const closeMins = closeTime.getHours() * 60 + closeTime.getMinutes();
+
+        if (startMins < openMins || endMins > closeMins) {
             return res.status(400).json({
                 error: "Booking time is outside facility operating hours",
             });
