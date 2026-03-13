@@ -465,13 +465,13 @@ router.get("/condos/:condoId", async (req, res) => {
       taxId: condo.taxId,
       billingSetting: condo.billingSetting
         ? {
-            dueDay: condo.billingSetting.dueDay,
-            acceptFine: condo.billingSetting.acceptFine,
-            finePerDay:
-              condo.billingSetting.finePerDay != null
-                ? Number(condo.billingSetting.finePerDay)
-                : null,
-          }
+          dueDay: condo.billingSetting.dueDay,
+          acceptFine: condo.billingSetting.acceptFine,
+          finePerDay:
+            condo.billingSetting.finePerDay != null
+              ? Number(condo.billingSetting.finePerDay)
+              : null,
+        }
         : null,
     });
   } catch (err: any) {
@@ -651,11 +651,11 @@ router.get("/condos/:condoId/dashboard", async (req, res) => {
       activeRoomsForAvg.length === 0
         ? 0
         : Math.round(
-            activeRoomsForAvg.reduce(
-              (sum, r) => sum + Number(r.rentPrice ?? 0),
-              0
-            ) / activeRoomsForAvg.length
-          );
+          activeRoomsForAvg.reduce(
+            (sum, r) => sum + Number(r.rentPrice ?? 0),
+            0
+          ) / activeRoomsForAvg.length
+        );
 
     function classifyInvoiceItemType(itemType: string) {
       const t = String(itemType ?? "").toUpperCase();
@@ -982,8 +982,8 @@ router.post("/condos/:condoId/invoices", async (req, res) => {
       status === "PAID"
         ? "PAID"
         : status === "DRAFT"
-        ? "DRAFT"
-        : "ISSUED";
+          ? "DRAFT"
+          : "ISSUED";
 
     const safeItems = Array.isArray(items) ? items : [];
 
