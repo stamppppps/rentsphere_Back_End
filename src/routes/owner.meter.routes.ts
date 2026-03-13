@@ -284,17 +284,17 @@ router.get("/rooms/:roomId/meters", async (req, res) => {
       prevElectric: Number(prevReading?.currElectric ?? 0),
       reading: reading
         ? {
-            id: reading.id,
-            currWater: Number(reading.currWater ?? 0),
-            currElectric: Number(reading.currElectric ?? 0),
-            waterUnits: Number(reading.waterUnits ?? 0),
-            electricUnits: Number(reading.electricUnits ?? 0),
-            waterCharge: Number(reading.waterCharge ?? 0),
-            electricCharge: Number(reading.electricCharge ?? 0),
-            status: reading.status,
-            recordedAt: reading.recordedAt,
-            note: reading.note,
-          }
+          id: reading.id,
+          currWater: Number(reading.currWater ?? 0),
+          currElectric: Number(reading.currElectric ?? 0),
+          waterUnits: Number(reading.waterUnits ?? 0),
+          electricUnits: Number(reading.electricUnits ?? 0),
+          waterCharge: Number(reading.waterCharge ?? 0),
+          electricCharge: Number(reading.electricCharge ?? 0),
+          status: reading.status,
+          recordedAt: reading.recordedAt,
+          note: reading.note,
+        }
         : null,
     });
   } catch (e: any) {
@@ -311,7 +311,7 @@ router.post("/rooms/:roomId/meters", async (req, res) => {
   try {
     const room = await assertOwnerRoomOrThrow(req, req.params.roomId);
 
-    const { cycleId, month, currWater, currElectric, note } = req.body;
+    const { cycleId, month, currWater, currElectric, note, initWater, initElectric } = req.body;
 
     let cycle = null;
 
@@ -356,8 +356,13 @@ router.post("/rooms/:roomId/meters", async (req, res) => {
         },
       });
 
-      const prevWater = Number(prevReading?.currWater ?? 0);
-      const prevElectric = Number(prevReading?.currElectric ?? 0);
+      // Use user-provided initial values when no previous reading exists
+      const prevWater = prevReading
+        ? Number(prevReading.currWater ?? 0)
+        : Math.max(0, toSafeNumber(initWater));
+      const prevElectric = prevReading
+        ? Number(prevReading.currElectric ?? 0)
+        : Math.max(0, toSafeNumber(initElectric));
 
       if (safeCurrWater < prevWater) {
         const err: any = new Error("เลขมิเตอร์น้ำต้องไม่น้อยกว่าครั้งก่อน");
@@ -383,24 +388,24 @@ router.post("/rooms/:roomId/meters", async (req, res) => {
 
       const waterCharge = waterSetting
         ? calcUtilityCharge(
-            waterUnits,
-            waterSetting.billingType,
-            Number(waterSetting.rate),
-            waterSetting.minimumCharge == null
-              ? null
-              : Number(waterSetting.minimumCharge)
-          )
+          waterUnits,
+          waterSetting.billingType,
+          Number(waterSetting.rate),
+          waterSetting.minimumCharge == null
+            ? null
+            : Number(waterSetting.minimumCharge)
+        )
         : 0;
 
       const electricCharge = electricSetting
         ? calcUtilityCharge(
-            electricUnits,
-            electricSetting.billingType,
-            Number(electricSetting.rate),
-            electricSetting.minimumCharge == null
-              ? null
-              : Number(electricSetting.minimumCharge)
-          )
+          electricUnits,
+          electricSetting.billingType,
+          Number(electricSetting.rate),
+          electricSetting.minimumCharge == null
+            ? null
+            : Number(electricSetting.minimumCharge)
+        )
         : 0;
 
       return tx.meterReading.upsert({
@@ -417,7 +422,7 @@ router.post("/rooms/:roomId/meters", async (req, res) => {
           currElectric: safeCurrElectric,
           waterUnits,
           electricUnits,
-          waterCharge,
+          //waterCharge,
           electricCharge,
           note: safeNote,
           status: "SUBMITTED",
@@ -434,7 +439,7 @@ router.post("/rooms/:roomId/meters", async (req, res) => {
           currElectric: safeCurrElectric,
           waterUnits,
           electricUnits,
-          waterCharge,
+          //waterCharge,
           electricCharge,
           note: safeNote,
           status: "SUBMITTED",
@@ -454,8 +459,8 @@ router.post("/rooms/:roomId/meters", async (req, res) => {
       currElectric: Number(saved.currElectric ?? 0),
       waterUnits: Number(saved.waterUnits ?? 0),
       electricUnits: Number(saved.electricUnits ?? 0),
-      waterCharge: Number(saved.waterCharge ?? 0),
-      electricCharge: Number(saved.electricCharge ?? 0),
+      // waterCharge: Number(saved.waterCharge ?? 0),
+      // electricCharge: Number(saved.electricCharge ?? 0),
       status: saved.status,
       recordedAt: saved.recordedAt,
       note: saved.note,
